@@ -8,11 +8,11 @@ use cec_rs::{
     CecKeypress, CecLogMessage, CecLogicalAddress, CecPowerStatus, CecVersion,
 };
 use color_eyre::{eyre::Context, Report, Result};
-use futures::executor::block_on;
+use futures::{executor::block_on, Future};
 use tokio::{
     sync::{
         mpsc::{self, Sender},
-        Mutex,
+        Mutex, MutexGuard,
     },
     task,
 };
@@ -54,6 +54,21 @@ struct Device {
 static EVENT_TX: OnceLock<Sender<Event>> = OnceLock::new();
 static HOOK: OnceLock<HHOOK> = OnceLock::new();
 
+async fn spawn_cec_task<F>(cec: Arc<Mutex<CecConnection>>, f: F) -> Result<()>
+where
+    F: FnOnce(MutexGuard<CecConnection>) + std::marker::Send + 'static,
+{
+    let cec = cec.clone();
+    task::spawn_blocking(|| async move {
+        let cec_guard = cec.lock().await;
+        f(cec_guard);
+    })
+    .await?
+    .await;
+
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing()?;
@@ -70,52 +85,42 @@ async fn main() -> Result<()> {
         match message {
             Event::Suspend => {
                 info!("suspend");
-                // cec.send_standby_devices(CecLogicalAddress::Unregistered)?;
+                spawn_cec_task(cec.clone(), |cec| {
+                    cec.send_standby_devices(CecLogicalAddress::Unregistered)
+                        .unwrap();
+                })
+                .await?;
             }
             Event::Resume => {
                 info!("resume");
-                // cec.send_power_on_devices(CecLogicalAddress::Unregistered)?;
+                spawn_cec_task(cec.clone(), |cec| {
+                    cec.send_power_on_devices(CecLogicalAddress::Unregistered)
+                        .unwrap();
+                })
+                .await?;
             }
             Event::Paint => info!("window paint"),
             Event::Destroy => info!("window destroy"),
             Event::VolumeUp => {
                 info!("volume up");
 
-                let cec = cec.clone();
-                task::spawn_blocking(|| async move {
-                    cec.lock()
-                        .await
-                        .volume_up(true)
-                        .context("failed to increase volume")?;
-                    Result::<(), Report>::Ok(())
+                spawn_cec_task(cec.clone(), |cec| {
+                    cec.volume_up(false).unwrap();
                 })
-                .await?
                 .await?;
             }
             Event::VolumeDown => {
                 info!("volume down");
-                let cec = cec.clone();
-                task::spawn_blocking(|| async move {
-                    cec.lock()
-                        .await
-                        .volume_down(true)
-                        .context("failed to decrease volume")?;
-                    Result::<(), Report>::Ok(())
+                spawn_cec_task(cec.clone(), |cec| {
+                    cec.volume_down(false).unwrap();
                 })
-                .await?
                 .await?;
             }
             Event::ToggleMute => {
                 info!("toggle mute");
-                let cec = cec.clone();
-                task::spawn_blocking(|| async move {
-                    cec.lock()
-                        .await
-                        .audio_toggle_mute()
-                        .context("failed to toggle mute")?;
-                    Result::<(), Report>::Ok(())
+                spawn_cec_task(cec.clone(), |cec| {
+                    cec.audio_toggle_mute().unwrap();
                 })
-                .await?
                 .await?;
             }
         }
