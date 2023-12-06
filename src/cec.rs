@@ -1,13 +1,12 @@
+use cec_rs::{
+    CecCommand, CecConnection, CecConnectionCfgBuilder, CecDeviceType, CecDeviceTypeVec,
+    CecKeypress, CecLogMessage, CecLogicalAddress, CecPowerStatus, CecVersion,
+};
+use color_eyre::{eyre::Context, Result};
 use std::{
     ffi::{c_char, CStr},
     sync::Arc,
 };
-
-use cec_rs::{
-    CecCommand, CecConnection, CecConnectionCfgBuilder, CecDeviceType, CecDeviceTypeVec,
-    CecKeypress, CecLogMessage, CecPowerStatus, CecVersion,
-};
-use color_eyre::{eyre::Context, Result};
 use tokio::{
     sync::{Mutex, MutexGuard},
     task,
@@ -23,6 +22,72 @@ pub enum Event {
     ToggleMute,
 }
 
+impl Event {
+    pub async fn handle(&self, cec: CecHandle) -> Result<()> {
+        let cec = cec.clone();
+
+        match self {
+            Event::Suspend => Self::handle_suspend(cec).await,
+            Event::Resume => Self::handle_resume(cec).await,
+            Event::VolumeUp => Self::handle_volume_up(cec).await,
+            Event::VolumeDown => Self::handle_volume_down(cec).await,
+            Event::ToggleMute => Self::handle_toggle_mute(cec).await,
+        }?;
+
+        Ok(())
+    }
+
+    async fn handle_suspend(cec: CecHandle) -> Result<()> {
+        info!("suspend");
+        self::spawn_task(cec.clone(), |cec| {
+            cec.send_standby_devices(CecLogicalAddress::Unregistered)?;
+            Ok(())
+        })
+        .await?;
+        Ok(())
+    }
+
+    async fn handle_resume(cec: CecHandle) -> Result<()> {
+        info!("resume");
+        self::spawn_task(cec.clone(), |cec| {
+            cec.send_power_on_devices(CecLogicalAddress::Unregistered)?;
+            Ok(())
+        })
+        .await?;
+        Ok(())
+    }
+
+    async fn handle_volume_up(cec: CecHandle) -> Result<()> {
+        info!("volume up");
+        self::spawn_task(cec.clone(), |cec| {
+            cec.volume_up(false)?;
+            Ok(())
+        })
+        .await?;
+        Ok(())
+    }
+
+    async fn handle_volume_down(cec: CecHandle) -> Result<()> {
+        info!("volume down");
+        self::spawn_task(cec.clone(), |cec| {
+            cec.volume_down(false)?;
+            Ok(())
+        })
+        .await?;
+        Ok(())
+    }
+
+    async fn handle_toggle_mute(cec: CecHandle) -> Result<()> {
+        info!("toggle mute");
+        self::spawn_task(cec.clone(), |cec| {
+            cec.audio_toggle_mute()?;
+            Ok(())
+        })
+        .await?;
+        Ok(())
+    }
+}
+
 #[derive(Debug)]
 pub struct Device {
     vendor: String,
@@ -35,7 +100,9 @@ pub struct Device {
     is_active: bool,
 }
 
-pub async fn spawn_cec_task<F>(cec: Arc<Mutex<CecConnection>>, f: F) -> Result<()>
+pub type CecHandle = Arc<Mutex<CecConnection>>;
+
+pub async fn spawn_task<F>(cec: CecHandle, f: F) -> Result<()>
 where
     F: FnOnce(MutexGuard<CecConnection>) -> Result<()> + std::marker::Send + 'static,
 {
@@ -48,26 +115,7 @@ where
     .await
 }
 
-pub fn on_key_press(keypress: CecKeypress) {
-    info!("got key: {:?}", keypress);
-}
-
-pub fn on_command_received(command: CecCommand) {
-    info!("got cmd: {:?}", command);
-}
-
-pub fn on_log_level(log: CecLogMessage) {
-    match log.level {
-        cec_rs::CecLogLevel::Error => error!("{}", log.message),
-        cec_rs::CecLogLevel::Warning => warn!("{}", log.message),
-        cec_rs::CecLogLevel::Notice => info!("notice: {}", log.message),
-        cec_rs::CecLogLevel::Traffic => trace!("{}", log.message),
-        cec_rs::CecLogLevel::Debug => debug!("{}", log.message),
-        cec_rs::CecLogLevel::All => info!("all: {}", log.message),
-    }
-}
-
-pub fn init_cec() -> Result<CecConnection> {
+pub fn init() -> Result<CecHandle> {
     let cfg = CecConnectionCfgBuilder::default()
         .device_name("cec-rs".to_owned())
         .device_types(CecDeviceTypeVec::new(CecDeviceType::RecordingDevice))
@@ -84,7 +132,7 @@ pub fn init_cec() -> Result<CecConnection> {
         .autodetect()
         .context("failed to connect to cec adapter")?;
 
-    Ok(cec)
+    Ok(Arc::new(Mutex::new(cec)))
 }
 
 pub async fn print_devices(cec: Arc<Mutex<CecConnection>>) {
@@ -153,5 +201,24 @@ pub async fn print_devices(cec: Arc<Mutex<CecConnection>>) {
         }
 
         info!("found devices: {:#?}", parsed_devices);
+    }
+}
+
+pub fn on_key_press(keypress: CecKeypress) {
+    info!("got key: {:?}", keypress);
+}
+
+pub fn on_command_received(command: CecCommand) {
+    info!("got cmd: {:?}", command);
+}
+
+pub fn on_log_level(log: CecLogMessage) {
+    match log.level {
+        cec_rs::CecLogLevel::Error => error!("{}", log.message),
+        cec_rs::CecLogLevel::Warning => warn!("{}", log.message),
+        cec_rs::CecLogLevel::Notice => info!("notice: {}", log.message),
+        cec_rs::CecLogLevel::Traffic => trace!("{}", log.message),
+        cec_rs::CecLogLevel::Debug => debug!("{}", log.message),
+        cec_rs::CecLogLevel::All => info!("all: {}", log.message),
     }
 }

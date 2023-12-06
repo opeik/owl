@@ -1,3 +1,4 @@
+use crate::cec::Event;
 use color_eyre::{eyre::eyre, Result};
 use futures::executor::block_on;
 use tracing::error;
@@ -20,8 +21,6 @@ use windows::{
     },
 };
 
-use crate::cec::Event;
-
 macro_rules! send_event {
     ($tx:expr, $event:expr) => {
         match block_on($tx.send($event)) {
@@ -33,7 +32,7 @@ macro_rules! send_event {
     };
 }
 
-pub fn spawn_window() -> Result<()> {
+pub fn init() -> Result<()> {
     unsafe {
         let module = GetModuleHandleW(None)?;
         if module.0 == 0 {

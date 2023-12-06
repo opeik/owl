@@ -1,9 +1,8 @@
 pub mod cec;
 pub mod win32;
 
-use std::sync::OnceLock;
-
 use crate::cec::Event;
+use std::sync::OnceLock;
 use tokio::sync::mpsc::Sender;
 use windows::Win32::UI::WindowsAndMessaging::HHOOK;
 
