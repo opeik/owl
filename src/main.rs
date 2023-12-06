@@ -22,13 +22,8 @@ use tokio::{
 use tracing::{debug, error, info, level_filters::LevelFilter, trace, warn};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 use windows::{
-    core::*,
-    Win32::Foundation::*,
-    Win32::Graphics::Gdi::ValidateRect,
-    Win32::System::LibraryLoader::GetModuleHandleA,
-    Win32::UI::Input::KeyboardAndMouse::*,
-    Win32::UI::Input::*,
-    Win32::{Devices::HumanInterfaceDevice::*, UI::WindowsAndMessaging::*},
+    core::*, Win32::Foundation::*, Win32::Graphics::Gdi::*, Win32::System::LibraryLoader::*,
+    Win32::UI::Input::KeyboardAndMouse::*, Win32::UI::WindowsAndMessaging::*,
 };
 
 enum Event {
@@ -80,6 +75,7 @@ async fn main() -> Result<()> {
         spawn_window().unwrap();
     });
     let cec = Arc::new(Mutex::new(init_cec()?));
+    // print_devices(cec.clone()).await;
 
     while let Some(message) = rx.recv().await {
         match message {
@@ -163,13 +159,6 @@ fn init_cec() -> Result<CecConnection> {
     let cec = cfg
         .autodetect()
         .context("failed to connect to cec adapter")?;
-    info!("connected!");
-
-    info!("setting active source to tv");
-    cec.set_active_source(CecDeviceType::Tv)?;
-
-    // cec.set_active_source(CecDeviceType)?;
-    // cec.send_standby_devices(CecLogicalAddress::Unregistered)?;
 
     Ok(cec)
 }
@@ -245,14 +234,14 @@ async fn print_devices(cec: Arc<Mutex<CecConnection>>) {
 
 fn spawn_window() -> Result<()> {
     unsafe {
-        let module = GetModuleHandleA(None)?;
+        let module = GetModuleHandleW(None)?;
         if module.0 == 0 {
             return Err(eyre!("failed to get module handle"));
         }
 
-        let window_class = s!("window");
+        let window_class = w!("window");
 
-        let wc = WNDCLASSA {
+        let wc = WNDCLASSW {
             hCursor: LoadCursorW(None, IDC_ARROW)?,
             hInstance: module.into(),
             lpszClassName: window_class,
@@ -262,15 +251,15 @@ fn spawn_window() -> Result<()> {
             ..Default::default()
         };
 
-        let atom = RegisterClassA(&wc);
+        let atom = RegisterClassW(&wc);
         if atom == 0 {
             return Err(eyre!("failed to register class"));
         }
 
-        let _window = CreateWindowExA(
+        let _window = CreateWindowExW(
             WINDOW_EX_STYLE::default(),
             window_class,
-            s!("owl (crimes inside!)"),
+            w!("owl (crimes inside!)"),
             WS_DISABLED,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
@@ -283,12 +272,12 @@ fn spawn_window() -> Result<()> {
         );
 
         // begin the crimes
-        let hook = SetWindowsHookExA(WH_KEYBOARD_LL, Some(keyboard_handler), module, 0)?;
+        let hook = SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_handler), module, 0)?;
         KEYBOARD_HOOK.set(hook).unwrap();
 
         let mut message = MSG::default();
-        while GetMessageA(&mut message, None, 0, 0).into() {
-            DispatchMessageA(&message);
+        while GetMessageW(&mut message, None, 0, 0).into() {
+            DispatchMessageW(&message);
         }
     }
 
@@ -352,9 +341,9 @@ extern "system" fn window_handler(
                     _ => {}
                 }
 
-                DefWindowProcA(window, message, wparam, lparam)
+                DefWindowProcW(window, message, wparam, lparam)
             }
-            _ => DefWindowProcA(window, message, wparam, lparam),
+            _ => DefWindowProcW(window, message, wparam, lparam),
         }
     }
 }
