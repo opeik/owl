@@ -7,8 +7,11 @@ use cec_rs::{
     CecCommand, CecConnection, CecConnectionCfgBuilder, CecDeviceType, CecDeviceTypeVec,
     CecKeypress, CecLogMessage, CecLogicalAddress, CecPowerStatus, CecVersion,
 };
-use color_eyre::{eyre::Context, Report, Result};
-use futures::{executor::block_on, Future};
+use color_eyre::{
+    eyre::{eyre, Context},
+    Result,
+};
+use futures::executor::block_on;
 use tokio::{
     sync::{
         mpsc::{self, Sender},
@@ -26,7 +29,6 @@ use windows::{
     Win32::UI::Input::KeyboardAndMouse::*,
     Win32::UI::Input::*,
     Win32::{Devices::HumanInterfaceDevice::*, UI::WindowsAndMessaging::*},
-    Win32::{System::SystemServices::*, UI::Input::*},
 };
 
 enum Event {
@@ -52,21 +54,19 @@ struct Device {
 }
 
 static EVENT_TX: OnceLock<Sender<Event>> = OnceLock::new();
-static HOOK: OnceLock<HHOOK> = OnceLock::new();
+static KEYBOARD_HOOK: OnceLock<HHOOK> = OnceLock::new();
 
 async fn spawn_cec_task<F>(cec: Arc<Mutex<CecConnection>>, f: F) -> Result<()>
 where
-    F: FnOnce(MutexGuard<CecConnection>) + std::marker::Send + 'static,
+    F: FnOnce(MutexGuard<CecConnection>) -> Result<()> + std::marker::Send + 'static,
 {
     let cec = cec.clone();
     task::spawn_blocking(|| async move {
         let cec_guard = cec.lock().await;
-        f(cec_guard);
+        f(cec_guard)
     })
     .await?
-    .await;
-
-    Ok(())
+    .await
 }
 
 #[tokio::main]
@@ -86,16 +86,16 @@ async fn main() -> Result<()> {
             Event::Suspend => {
                 info!("suspend");
                 spawn_cec_task(cec.clone(), |cec| {
-                    cec.send_standby_devices(CecLogicalAddress::Unregistered)
-                        .unwrap();
+                    cec.send_standby_devices(CecLogicalAddress::Unregistered)?;
+                    Ok(())
                 })
                 .await?;
             }
             Event::Resume => {
                 info!("resume");
                 spawn_cec_task(cec.clone(), |cec| {
-                    cec.send_power_on_devices(CecLogicalAddress::Unregistered)
-                        .unwrap();
+                    cec.send_power_on_devices(CecLogicalAddress::Unregistered)?;
+                    Ok(())
                 })
                 .await?;
             }
@@ -105,21 +105,24 @@ async fn main() -> Result<()> {
                 info!("volume up");
 
                 spawn_cec_task(cec.clone(), |cec| {
-                    cec.volume_up(false).unwrap();
+                    cec.volume_up(false)?;
+                    Ok(())
                 })
                 .await?;
             }
             Event::VolumeDown => {
                 info!("volume down");
                 spawn_cec_task(cec.clone(), |cec| {
-                    cec.volume_down(false).unwrap();
+                    cec.volume_down(false)?;
+                    Ok(())
                 })
                 .await?;
             }
             Event::ToggleMute => {
                 info!("toggle mute");
                 spawn_cec_task(cec.clone(), |cec| {
-                    cec.audio_toggle_mute().unwrap();
+                    cec.audio_toggle_mute()?;
+                    Ok(())
                 })
                 .await?;
             }
@@ -177,7 +180,6 @@ async fn print_devices(cec: Arc<Mutex<CecConnection>>) {
 
         let connection = cec.1;
         let devices = libcec_sys::libcec_get_active_devices(connection);
-        let active_source = libcec_sys::libcec_get_active_source(connection);
 
         let mut parsed_devices = Vec::<Device>::new();
         for (addr, does_exist_raw) in devices.addresses.iter().enumerate() {
@@ -243,14 +245,16 @@ async fn print_devices(cec: Arc<Mutex<CecConnection>>) {
 
 fn spawn_window() -> Result<()> {
     unsafe {
-        let instance = GetModuleHandleA(None)?;
-        debug_assert!(instance.0 != 0);
+        let module = GetModuleHandleA(None)?;
+        if module.0 == 0 {
+            return Err(eyre!("failed to get module handle"));
+        }
 
         let window_class = s!("window");
 
         let wc = WNDCLASSA {
             hCursor: LoadCursorW(None, IDC_ARROW)?,
-            hInstance: instance.into(),
+            hInstance: module.into(),
             lpszClassName: window_class,
 
             style: CS_HREDRAW | CS_VREDRAW,
@@ -259,38 +263,30 @@ fn spawn_window() -> Result<()> {
         };
 
         let atom = RegisterClassA(&wc);
-        debug_assert!(atom != 0);
+        if atom == 0 {
+            return Err(eyre!("failed to register class"));
+        }
 
-        let window = CreateWindowExA(
+        let _window = CreateWindowExA(
             WINDOW_EX_STYLE::default(),
             window_class,
-            s!("This is a sample window"),
-            WS_OVERLAPPEDWINDOW, // Peter: Use WS_APPLICATION_EX
+            s!("owl (crimes inside!)"),
+            WS_DISABLED,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             CW_USEDEFAULT,
             None,
             None,
-            instance,
+            module,
             None,
         );
 
+        // begin the crimes
+        let hook = SetWindowsHookExA(WH_KEYBOARD_LL, Some(keyboard_handler), module, 0)?;
+        KEYBOARD_HOOK.set(hook).unwrap();
+
         let mut message = MSG::default();
-
-        let input_devices = [RAWINPUTDEVICE {
-            usUsagePage: HID_USAGE_PAGE_GENERIC,
-            usUsage: HID_USAGE_GENERIC_KEYBOARD,
-            dwFlags: RIDEV_DEVNOTIFY | RIDEV_INPUTSINK,
-            hwndTarget: window,
-        }];
-
-        // RegisterRawInputDevices(&input_devices, std::mem::size_of::<RAWINPUTDEVICE>() as u32)?;
-
-        let module = GetModuleHandleA(PCSTR::null())?;
-        let hook = SetWindowsHookExA(WH_KEYBOARD_LL, Some(keyboard_hook), module, 0)?;
-        HOOK.set(hook).unwrap();
-
         while GetMessageA(&mut message, None, 0, 0).into() {
             DispatchMessageA(&message);
         }
@@ -363,10 +359,10 @@ extern "system" fn window_handler(
     }
 }
 
-extern "system" fn keyboard_hook(ncode: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+extern "system" fn keyboard_handler(ncode: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     unsafe {
         let tx = EVENT_TX.get().expect("event tx uninitalized").clone();
-        let hook = HOOK.get().expect("keyboard hook uninitialized");
+        let hook = KEYBOARD_HOOK.get().expect("keyboard hook uninitialized");
 
         if ncode < 0 || ncode != HC_ACTION as i32 {
             return CallNextHookEx(*hook, ncode, wparam, lparam);
