@@ -2,6 +2,8 @@
     "cSpell.words": [
         "APMRESUMEAUTOMATIC",
         "APMSUSPEND",
+        "HHOOK",
+        "HMODULE",
         "HREDRAW",
         "HWND",
         "KBDLLHOOKSTRUCT",
@@ -11,6 +13,7 @@
         "lpsz",
         "LRESULT",
         "ncode",
+        "PCWSTR",
         "VREDRAW",
         "WNDCLASSW",
         "WPARAM"
