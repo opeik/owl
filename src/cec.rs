@@ -2,7 +2,7 @@ use cec_rs::{
     CecCommand, CecConnection, CecConnectionCfgBuilder, CecDeviceType, CecDeviceTypeVec,
     CecKeypress, CecLogMessage, CecLogicalAddress, CecPowerStatus, CecVersion,
 };
-use color_eyre::{eyre::eyre, eyre::Context, Result};
+use color_eyre::{eyre::Context, Result};
 use std::thread::{self, JoinHandle};
 use tokio::sync::mpsc::{self, Sender};
 use tracing::{debug, error, info, trace, warn};
@@ -18,10 +18,8 @@ pub enum Command {
     VolumeMute,
 }
 
-#[derive(Debug)]
-pub struct Cec {
-    inner: CecConnection,
-}
+#[derive(Debug, derive_more::Deref)]
+pub struct Cec(CecConnection);
 
 impl Cec {
     pub fn new() -> Result<Self> {
@@ -37,10 +35,10 @@ impl Cec {
             .build()
             .context("invalid cec config")?;
 
-        let inner = cfg.autodetect().context("failed to connect to cec")?;
+        let cec = cfg.autodetect().context("failed to connect to cec")?;
         info!("connected to cec!");
 
-        Ok(Self { inner })
+        Ok(Self(cec))
     }
 }
 
@@ -58,15 +56,11 @@ pub fn spawn_thread() -> (JoinHandle<Result<()>>, Sender<Command>) {
             debug!("sending command `{cmd}`...");
 
             match cmd {
-                Command::PowerOn => cec
-                    .inner
-                    .send_power_on_devices(CecLogicalAddress::Unregistered)?,
-                Command::PowerOff => cec
-                    .inner
-                    .send_standby_devices(CecLogicalAddress::Unregistered)?,
-                Command::VolumeUp => cec.inner.volume_up(true)?,
-                Command::VolumeDown => cec.inner.volume_down(true)?,
-                Command::VolumeMute => cec.inner.audio_toggle_mute()?,
+                Command::PowerOn => cec.send_power_on_devices(CecLogicalAddress::Unregistered)?,
+                Command::PowerOff => cec.send_standby_devices(CecLogicalAddress::Unregistered)?,
+                Command::VolumeUp => cec.volume_up(true)?,
+                Command::VolumeDown => cec.volume_down(true)?,
+                Command::VolumeMute => cec.audio_toggle_mute()?,
             }
         }
 
@@ -75,55 +69,37 @@ pub fn spawn_thread() -> (JoinHandle<Result<()>>, Sender<Command>) {
 
     (handle, cmd_tx)
 }
-//     async fn handle_suspend(cec: CecHandle) -> Result<()> {
-//         info!("suspend");
-//         self::spawn_task(cec.clone(), |cec| {
-//             Ok(())
-//         })
-//         .await?;
-//         Ok(())
-//     }
 
-//     async fn handle_resume(cec: CecHandle) -> Result<()> {
-//         info!("resume");
-//         self::spawn_task(cec.clone(), |cec| {
-//             ;
-//             Ok(())
-//         })
-//         .await?;
-//         Ok(())
-//     }
+impl From<Event> for Command {
+    fn from(value: Event) -> Self {
+        match value {
+            Event::Suspend => Command::PowerOff,
+            Event::Resume => Command::PowerOn,
+            Event::VolumeUp => Command::VolumeUp,
+            Event::VolumeDown => Command::VolumeDown,
+            Event::VolumeMute => Command::VolumeMute,
+        }
+    }
+}
 
-//     async fn handle_volume_up(cec: CecHandle) -> Result<()> {
-//         info!("volume up");
-//         self::spawn_task(cec.clone(), |cec| {
-//             cec.volume_up(true)?;
-//             Ok(())
-//         })
-//         .await?;
-//         Ok(())
-//     }
+pub fn on_key_press(keypress: CecKeypress) {
+    info!("got key: {:?}", keypress);
+}
 
-//     async fn handle_volume_down(cec: CecHandle) -> Result<()> {
-//         info!("volume down");
-//         self::spawn_task(cec.clone(), |cec| {
-//             cec.volume_down(true)?;
-//             Ok(())
-//         })
-//         .await?;
-//         Ok(())
-//     }
+pub fn on_command_received(command: CecCommand) {
+    info!("got cmd: {:?}", command);
+}
 
-//     async fn handle_toggle_mute(cec: CecHandle) -> Result<()> {
-//         info!("toggle mute");
-//         self::spawn_task(cec.clone(), |cec| {
-//             cec.audio_toggle_mute()?;
-//             Ok(())
-//         })
-//         .await?;
-//         Ok(())
-//     }
-// }
+pub fn on_log_level(log: CecLogMessage) {
+    match log.level {
+        cec_rs::CecLogLevel::Error => error!("{}", log.message),
+        cec_rs::CecLogLevel::Warning => warn!("{}", log.message),
+        cec_rs::CecLogLevel::Notice => info!("notice: {}", log.message),
+        cec_rs::CecLogLevel::Traffic => trace!("{}", log.message),
+        cec_rs::CecLogLevel::Debug => debug!("{}", log.message),
+        cec_rs::CecLogLevel::All => info!("all: {}", log.message),
+    }
+}
 
 // #[derive(Debug)]
 // pub struct Device {
@@ -135,21 +111,6 @@ pub fn spawn_thread() -> (JoinHandle<Result<()>>, Sender<Command>) {
 //     cec_version: CecVersion,
 //     power_status: CecPowerStatus,
 //     is_active: bool,
-// }
-
-// pub type CecHandle = Arc<Mutex<CecConnection>>;
-
-// pub async fn spawn_task<F>(cec: CecHandle, f: F) -> Result<()>
-// where
-//     F: FnOnce(MutexGuard<CecConnection>) -> Result<()> + std::marker::Send + 'static,
-// {
-//     let cec = cec.clone();
-//     task::spawn_blocking(|| async move {
-//         let cec_guard = cec.lock().await;
-//         f(cec_guard)
-//     })
-//     .await?
-//     .await
 // }
 
 // pub async fn print_devices(cec: Arc<Mutex<CecConnection>>) {
@@ -220,34 +181,3 @@ pub fn spawn_thread() -> (JoinHandle<Result<()>>, Sender<Command>) {
 //         info!("found devices: {:#?}", parsed_devices);
 //     }
 // }
-
-impl From<Event> for Command {
-    fn from(value: Event) -> Self {
-        match value {
-            Event::Suspend => Command::PowerOff,
-            Event::Resume => Command::PowerOn,
-            Event::VolumeUp => Command::VolumeUp,
-            Event::VolumeDown => Command::VolumeDown,
-            Event::VolumeMute => Command::VolumeMute,
-        }
-    }
-}
-
-pub fn on_key_press(keypress: CecKeypress) {
-    info!("got key: {:?}", keypress);
-}
-
-pub fn on_command_received(command: CecCommand) {
-    info!("got cmd: {:?}", command);
-}
-
-pub fn on_log_level(log: CecLogMessage) {
-    match log.level {
-        cec_rs::CecLogLevel::Error => error!("{}", log.message),
-        cec_rs::CecLogLevel::Warning => warn!("{}", log.message),
-        cec_rs::CecLogLevel::Notice => info!("notice: {}", log.message),
-        cec_rs::CecLogLevel::Traffic => trace!("{}", log.message),
-        cec_rs::CecLogLevel::Debug => debug!("{}", log.message),
-        cec_rs::CecLogLevel::All => info!("all: {}", log.message),
-    }
-}

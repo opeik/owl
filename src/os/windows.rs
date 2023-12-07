@@ -9,34 +9,24 @@ use ::windows::{
             Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP},
             WindowsAndMessaging::{
                 CallNextHookEx, CreateWindowExW, DefWindowProcW, DispatchMessageW, GetMessageW,
-                LoadCursorW, PostQuitMessage, RegisterClassW, SetWindowsHookExW, CS_HREDRAW,
-                CS_VREDRAW, CW_USEDEFAULT, HC_ACTION, IDC_ARROW, KBDLLHOOKSTRUCT, MSG,
-                PBT_APMRESUMEAUTOMATIC, PBT_APMSUSPEND, WH_KEYBOARD_LL, WINDOW_EX_STYLE,
-                WM_DESTROY, WM_KEYDOWN, WM_PAINT, WM_POWERBROADCAST, WNDCLASSW, WS_DISABLED,
+                PostQuitMessage, RegisterClassW, SetWindowsHookExW, CS_HREDRAW, CS_VREDRAW,
+                CW_USEDEFAULT, HC_ACTION, KBDLLHOOKSTRUCT, MSG, PBT_APMRESUMEAUTOMATIC,
+                PBT_APMSUSPEND, WH_KEYBOARD_LL, WINDOW_EX_STYLE, WM_DESTROY, WM_KEYDOWN, WM_PAINT,
+                WM_POWERBROADCAST, WNDCLASSW, WS_DISABLED,
             },
         },
     },
 };
-use color_eyre::{
-    eyre::{eyre, WrapErr},
-    Result,
-};
+use color_eyre::{eyre::eyre, Result};
 use std::{
-    future::Future,
     sync::OnceLock,
     thread::{self, JoinHandle},
 };
-use tokio::{
-    sync::mpsc::{self, Receiver, Sender},
-    task::{self},
-};
+use tokio::sync::mpsc::{self, Receiver, Sender};
 use tracing::{debug, error, info};
 use windows::{
     core::PCWSTR,
-    Win32::{
-        Foundation::HMODULE, System::SystemServices::PACKEDEVENTINFO,
-        UI::WindowsAndMessaging::HHOOK,
-    },
+    Win32::{Foundation::HMODULE, UI::WindowsAndMessaging::HHOOK},
 };
 
 pub static KEY_HOOK: OnceLock<HHOOK> = OnceLock::new();
