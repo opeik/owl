@@ -1,23 +1,47 @@
+use std::time::Duration;
+
 use color_eyre::Result;
-use owl::{cec, os};
+use owl::{os::Event, *};
 use tokio::signal;
-use tracing::{info, level_filters::LevelFilter};
+use tokio_util::sync::CancellationToken;
+use tracing::{debug, error, info, level_filters::LevelFilter};
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing()?;
 
-    info!("starting daemon...");
-    let (cec_thread, cmd_tx) = cec::spawn_thread();
-    let (os_thread, mut event_rx) = os::windows::spawn_thread();
+    info!("starting owl...");
+    let cancel_token = CancellationToken::new();
+    let (cec_thread, cec_job) = cec::Job::spawn(cancel_token.clone());
+    let (os_thread, mut os_job) = os::Job::spawn(cancel_token.clone());
+    let job_threads = [cec_thread, os_thread];
 
-    while let Some(event) = event_rx.recv().await {
-        cmd_tx.send(event.into()).await?;
+    let owl_task = tokio::spawn(async move {
+        while let Ok(event) = os_job.recv_event().await {
+            if let Err(e) = cec_job.send_cmd(event.into()).await {
+                error!("failed to send cec command: {e}");
+            }
+        }
+    });
+
+    tokio::select! {
+        _ = signal::ctrl_c() => {
+            info!("stopping owl...");
+            cancel_token.cancel();
+        }
+        _ = cancel_token.cancelled() => {
+            debug!("stop requested...")
+        }
+        _ = owl_task => {
+            error!("owl stopped unexpectedly?!");
+        }
     }
 
-    signal::ctrl_c().await.unwrap();
-    info!("received ctrl+c, stopping daemon...");
+    info!("waiting for jobs to stop...");
+    for thread in job_threads {
+        thread.join().unwrap()?;
+    }
 
     Ok(())
 }

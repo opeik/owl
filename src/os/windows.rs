@@ -21,25 +21,77 @@ use color_eyre::{eyre::eyre, Result};
 use std::{
     sync::OnceLock,
     thread::{self, JoinHandle},
+    time::Duration,
 };
 use tokio::sync::mpsc::{self, Receiver, Sender};
-use tracing::{debug, error, info};
+use tokio_util::sync::CancellationToken;
+use tracing::{debug, error};
 use windows::{
     core::PCWSTR,
-    Win32::{Foundation::HMODULE, UI::WindowsAndMessaging::HHOOK},
+    Win32::{
+        Foundation::HMODULE,
+        UI::WindowsAndMessaging::{PeekMessageW, HHOOK, PM_REMOVE},
+    },
 };
 
-pub static KEY_HOOK: OnceLock<HHOOK> = OnceLock::new();
-pub static EVENT_TX: OnceLock<Sender<Event>> = OnceLock::new();
+static KEY_HOOK: OnceLock<HHOOK> = OnceLock::new();
+static EVENT_TX: OnceLock<Sender<Event>> = OnceLock::new();
 
-pub struct Window {
+pub struct Job {
+    event_rx: Receiver<Event>,
+}
+
+struct Window {
     module: HMODULE,
     window: HWND,
     key_hook: HHOOK,
 }
 
+impl super::Spawn for Job {
+    fn spawn(cancel_token: CancellationToken) -> (JoinHandle<Result<()>>, Self) {
+        let (event_tx, event_rx) = mpsc::channel::<Event>(32);
+        EVENT_TX
+            .set(event_tx)
+            .expect("failed to set `os::event_tx`");
+
+        debug!("spawning os job...");
+        let handle = thread::spawn(move || {
+            debug!("os job started!");
+            let _window = Window::new()?;
+
+            debug!("os job ready!");
+            let mut message = MSG::default();
+
+            loop {
+                if cancel_token.is_cancelled() {
+                    debug!("stopping os job...");
+                    break;
+                }
+
+                let found_msg = unsafe { PeekMessageW(&mut message, None, 0, 0, PM_REMOVE) }.into();
+                if found_msg {
+                    unsafe { DispatchMessageW(&message) };
+                }
+
+                std::thread::sleep(Duration::from_micros(100));
+            }
+
+            Ok(())
+        });
+
+        (handle, Self { event_rx })
+    }
+
+    async fn recv_event(&mut self) -> Result<Event> {
+        self.event_rx
+            .recv()
+            .await
+            .ok_or_else(|| eyre!("event rx closed"))
+    }
+}
+
 impl Window {
-    pub fn new() -> Result<Self> {
+    fn new() -> Result<Self> {
         const WINDOW_CLASS: PCWSTR = w!("window");
 
         debug!("getting module handle...");
@@ -80,15 +132,12 @@ impl Window {
             )
         };
 
-        // begin the crimes
-        debug!("registering key hook...");
+        debug!("registering key event hook...");
         let key_hook =
             unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(handle_key_event), module, 0)? };
         self::KEY_HOOK
             .set(key_hook)
             .expect("`os::key_hook` already set");
-
-        info!("power/key event watch ready!");
 
         Ok(Self {
             module,
@@ -98,35 +147,10 @@ impl Window {
     }
 }
 
-pub fn spawn_thread() -> (JoinHandle<Result<()>>, Receiver<Event>) {
-    let (event_tx, event_rx) = mpsc::channel::<Event>(32);
-    EVENT_TX
-        .set(event_tx)
-        .expect("failed to set `os::event_tx`");
-
-    debug!("spawning os thread...");
-    let handle = thread::spawn(move || {
-        debug!("os thread started!");
-        let _window = Window::new()?;
-
-        debug!("os thread ready!");
-        let mut message = MSG::default();
-        unsafe {
-            while GetMessageW(&mut message, None, 0, 0).into() {
-                DispatchMessageW(&message);
-            }
-        }
-
-        Ok(())
-    });
-
-    (handle, event_rx)
-}
-
 fn send_event(event_tx: Sender<Event>, event: Event) {
-    debug!("got event `{event}`");
+    debug!("got event: {event}");
     if let Err(e) = event_tx.blocking_send(event) {
-        error!("failed to send event `{event}`: {e}");
+        error!("failed to send event {event}: {e}");
     };
 }
 
@@ -159,34 +183,37 @@ extern "system" fn handle_window_event(
 }
 
 extern "system" fn handle_key_event(ncode: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    unsafe {
-        let event_tx = self::EVENT_TX.get().expect("`os::event_tx` unset").clone();
-        let hook = self::KEY_HOOK.get().expect("`os::key_hook` unset");
+    let event_tx = self::EVENT_TX.get().expect("`os::event_tx` unset").clone();
+    let hook = self::KEY_HOOK.get().expect("`os::key_hook` unset");
 
-        if ncode < 0 || ncode != HC_ACTION as i32 {
-            return CallNextHookEx(*hook, ncode, wparam, lparam);
-        }
-
-        let event = std::mem::transmute::<LPARAM, *const KBDLLHOOKSTRUCT>(lparam);
-        if wparam.0 as u32 == WM_KEYDOWN {
-            // Returning `LRESULT(1)` here "eats" the key event.
-            match VIRTUAL_KEY((*event).vkCode as _) {
-                VK_VOLUME_UP => {
-                    send_event(event_tx, Event::VolumeUp);
-                    return LRESULT(1);
-                }
-                VK_VOLUME_DOWN => {
-                    send_event(event_tx, Event::VolumeDown);
-                    return LRESULT(1);
-                }
-                VK_VOLUME_MUTE => {
-                    send_event(event_tx, Event::VolumeMute);
-                    return LRESULT(1);
-                }
-                _ => {}
-            }
-        }
-
-        CallNextHookEx(*hook, ncode, wparam, lparam)
+    if ncode < 0 || ncode != HC_ACTION as i32 {
+        return unsafe { CallNextHookEx(*hook, ncode, wparam, lparam) };
     }
+
+    let event = unsafe { std::mem::transmute::<LPARAM, *const KBDLLHOOKSTRUCT>(lparam) };
+    if event.is_null() {
+        return unsafe { CallNextHookEx(*hook, ncode, wparam, lparam) };
+    }
+
+    // Returning `LRESULT(1)` here "eats" the key event.
+    if wparam.0 as u32 == WM_KEYDOWN {
+        let key = VIRTUAL_KEY(unsafe { (*event).vkCode as _ });
+        match key {
+            VK_VOLUME_UP => {
+                send_event(event_tx, Event::VolumeUp);
+                return LRESULT(1);
+            }
+            VK_VOLUME_DOWN => {
+                send_event(event_tx, Event::VolumeDown);
+                return LRESULT(1);
+            }
+            VK_VOLUME_MUTE => {
+                send_event(event_tx, Event::VolumeMute);
+                return LRESULT(1);
+            }
+            _ => {}
+        }
+    }
+
+    unsafe { CallNextHookEx(*hook, ncode, wparam, lparam) }
 }
