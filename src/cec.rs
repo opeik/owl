@@ -3,17 +3,18 @@ use cec_rs::{
     CecCommand, CecConnection, CecConnectionCfgBuilder, CecDeviceType, CecDeviceTypeVec,
     CecKeypress, CecLogMessage, CecLogicalAddress, CecPowerStatus, CecVersion,
 };
-use color_eyre::{eyre::Context, Result};
+use color_eyre::eyre::{eyre, Context, Result};
 use std::{
+    collections::HashMap,
     ffi::{c_char, CStr},
     thread::{self, JoinHandle},
-    time::Duration,
+    time::{Duration, Instant},
 };
 use tokio::sync::mpsc::{self, Sender};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, derive_more::Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
 pub enum Command {
     PowerOn,
     PowerOff,
@@ -26,6 +27,7 @@ pub struct Job {
     cmd_tx: Sender<Command>,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
 struct Device {
     vendor: String,
@@ -49,9 +51,9 @@ impl Job {
         let handle = thread::spawn(move || {
             debug!("cec job started!");
 
-            const BROADCAST: CecLogicalAddress = CecLogicalAddress::Unregistered;
             let cancel_token = cancel_token;
             let cec = Cec::new()?;
+            let mut last_cmd_times = HashMap::<Command, Instant>::new();
 
             debug!("cec job ready!");
 
@@ -62,11 +64,28 @@ impl Job {
                 }
 
                 if let Ok(cmd) = cmd_rx.try_recv() {
-                    debug!("sending command: {cmd}");
+                    let time = Instant::now();
 
+                    if let Some(last_cmd_time) = last_cmd_times.get_mut(&cmd) {
+                        let delta_time = time.duration_since(*last_cmd_time);
+                        // Volume up/down events fire continuously if the button is held.
+                        // Debouncing prevents the channel and CEC bus from getting congested.
+                        if (cmd == Command::VolumeDown || cmd == Command::VolumeUp)
+                            && delta_time <= Duration::from_millis(200)
+                        {
+                            debug!("debouncing cmd {cmd}, delta: {delta_time:?}");
+                            continue;
+                        } else {
+                            *last_cmd_time = time;
+                        }
+                    } else {
+                        last_cmd_times.insert(cmd, time);
+                    }
+
+                    debug!("sending command: {cmd}");
                     match cmd {
                         Command::PowerOn => cec.set_active_source(CecDeviceType::PlaybackDevice)?,
-                        Command::PowerOff => cec.send_standby_devices(BROADCAST)?,
+                        Command::PowerOff => cec.send_standby_devices(CecLogicalAddress::Tv)?,
                         Command::VolumeUp => cec.volume_up(true)?,
                         Command::VolumeDown => cec.volume_down(true)?,
                         Command::VolumeMute => cec.audio_toggle_mute()?,
@@ -107,7 +126,7 @@ impl Cec {
         Ok(Self(cec))
     }
 
-    pub fn print_devices(&self) {
+    pub fn print_devices(&self) -> Result<()> {
         let connection = self.1;
         let devices = unsafe { libcec_sys::libcec_get_active_devices(connection) };
 
@@ -140,11 +159,11 @@ impl Cec {
             let cec_version = CecVersion::try_from(unsafe {
                 libcec_sys::libcec_get_device_cec_version(connection, logical_addr)
             })
-            .unwrap();
+            .map_err(|e| eyre!("failed to parse cec version: {e:?}"))?;
             let power_status = CecPowerStatus::try_from(unsafe {
                 libcec_sys::libcec_get_device_power_status(connection, logical_addr)
             })
-            .unwrap();
+            .map_err(|e| eyre!("failed to parse power status: {e:?}"))?;
             unsafe {
                 libcec_sys::libcec_get_device_osd_name(connection, logical_addr, &mut name_buf as _)
             };
@@ -175,6 +194,7 @@ impl Cec {
         }
 
         info!("found devices: {:#?}", parsed_devices);
+        Ok(())
     }
 }
 

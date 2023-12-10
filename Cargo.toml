@@ -27,8 +27,12 @@ tokio = { version = "1", features = ["full"] }
 tokio-util = "0.7"
 futures = "0.3"
 derive_more = { version = "=1.0.0-beta.6", features = ["full"] }
-cfg-if = "1.0"
+cfg-if = "1"
+tracing-error = "0.2"
 
 [patch.crates-io]
 libcec-sys = { path = "../libcec-sys" }
 cec-rs = { path = "../cec-rs" }
+
+[profile.dev.package.backtrace]
+opt-level = 3

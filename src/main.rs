@@ -1,20 +1,17 @@
-use std::time::Duration;
-
-use color_eyre::Result;
-use owl::{os::Event, *};
+use color_eyre::eyre::{eyre, Result};
+use owl::*;
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, level_filters::LevelFilter};
-use tracing_subscriber::{fmt, prelude::*, EnvFilter};
+use tracing::{debug, error, info};
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    init_tracing()?;
+    init_tracing();
 
     info!("starting owl...");
-    let cancel_token = CancellationToken::new();
-    let (cec_thread, cec_job) = cec::Job::spawn(cancel_token.clone());
-    let (os_thread, mut os_job) = os::Job::spawn(cancel_token.clone());
+    let is_running = CancellationToken::new();
+    let (cec_thread, cec_job) = cec::Job::spawn(is_running.clone());
+    let (os_thread, mut os_job) = os::Job::spawn(is_running.clone());
     let job_threads = [cec_thread, os_thread];
 
     let owl_task = tokio::spawn(async move {
@@ -28,9 +25,9 @@ async fn main() -> Result<()> {
     tokio::select! {
         _ = signal::ctrl_c() => {
             info!("stopping owl...");
-            cancel_token.cancel();
+            is_running.cancel();
         }
-        _ = cancel_token.cancelled() => {
+        _ = is_running.cancelled() => {
             debug!("stop requested...")
         }
         _ = owl_task => {
@@ -40,21 +37,29 @@ async fn main() -> Result<()> {
 
     info!("waiting for jobs to stop...");
     for thread in job_threads {
-        thread.join().unwrap()?;
+        thread
+            .join()
+            .map_err(|e| eyre!("failed to join thread: {e:?}"))??;
     }
 
     Ok(())
 }
 
-fn init_tracing() -> Result<()> {
-    color_eyre::install()?;
+fn init_tracing() {
+    use tracing_error::ErrorLayer;
+    use tracing_subscriber::{
+        prelude::*,
+        {fmt, EnvFilter},
+    };
+
+    let fmt_layer = fmt::layer().without_time();
+    let filter_layer = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new("owl=trace"))
+        .expect("failed to create tracing environment filter");
+
     tracing_subscriber::registry()
-        .with(fmt::layer().without_time())
-        .with(
-            EnvFilter::builder()
-                .with_default_directive(LevelFilter::ERROR.into())
-                .parse("owl=trace")?,
-        )
+        .with(filter_layer)
+        .with(fmt_layer)
+        .with(ErrorLayer::default())
         .init();
-    Ok(())
 }
