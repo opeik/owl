@@ -1,6 +1,10 @@
 use color_eyre::Result;
 use std::{future::Future, thread::JoinHandle};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
+
+pub type EventTx = mpsc::Sender<Event>;
+pub type EventRx = mpsc::Receiver<Event>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, derive_more::Display)]
 pub enum Event {
@@ -9,6 +13,7 @@ pub enum Event {
     VolumeUp,
     VolumeDown,
     VolumeMute,
+    UserActivity,
 }
 
 pub trait Spawn {

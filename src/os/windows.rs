@@ -1,4 +1,4 @@
-use super::Event;
+use super::{Event, EventRx, EventTx};
 use ::windows::{
     core::w,
     Win32::{
@@ -24,27 +24,34 @@ use std::{
     thread::{self, JoinHandle},
     time::Duration,
 };
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error};
+use tracing::{debug, error, info, trace};
 use windows::{
     core::PCWSTR,
     Win32::{
         Foundation::HMODULE,
-        UI::WindowsAndMessaging::{PeekMessageW, HHOOK, PM_REMOVE},
+        System::{
+            Power::{RegisterPowerSettingNotification, POWERBROADCAST_SETTING},
+            SystemServices::GUID_CONSOLE_DISPLAY_STATE,
+        },
+        UI::WindowsAndMessaging::{
+            PeekMessageW, DEVICE_NOTIFY_WINDOW_HANDLE, HHOOK, PBT_POWERSETTINGCHANGE, PM_REMOVE,
+        },
     },
 };
 
 static JOB_DATA: OnceLock<Arc<RwLock<JobData>>> = OnceLock::new();
 
 pub struct Job {
-    event_rx: Receiver<Event>,
+    event_rx: EventRx,
 }
 
 struct JobData {
-    event_tx: Sender<Event>,
+    event_tx: EventTx,
 }
 
+#[allow(dead_code)]
 struct Window {
     module: HMODULE,
     window: HWND,
@@ -67,10 +74,8 @@ impl super::Spawn for Job {
         debug!("spawning os job...");
         let handle = thread::spawn(move || {
             debug!("os job started!");
-            let _window = Window::new(event_tx)?;
-
+            let _window = Window::new(event_tx.clone())?;
             debug!("os job ready!");
-            let mut message = MSG::default();
 
             loop {
                 if cancel_token.is_cancelled() {
@@ -78,11 +83,7 @@ impl super::Spawn for Job {
                     break;
                 }
 
-                let found_msg = unsafe { PeekMessageW(&mut message, None, 0, 0, PM_REMOVE) }.into();
-                if found_msg {
-                    unsafe { DispatchMessageW(&message) };
-                }
-
+                poll_window_event();
                 std::thread::sleep(Duration::from_micros(100));
             }
 
@@ -100,8 +101,16 @@ impl super::Spawn for Job {
     }
 }
 
+fn poll_window_event() {
+    let mut message = MSG::default();
+    let found_msg = unsafe { PeekMessageW(&mut message, None, 0, 0, PM_REMOVE) }.into();
+    if found_msg {
+        unsafe { DispatchMessageW(&message) };
+    }
+}
+
 impl Window {
-    fn new(event_tx: Sender<Event>) -> Result<Self> {
+    fn new(event_tx: EventTx) -> Result<Self> {
         const WINDOW_CLASS: PCWSTR = w!("window");
 
         debug!("creating window...");
@@ -143,6 +152,14 @@ impl Window {
             )
         };
 
+        let foo = unsafe {
+            RegisterPowerSettingNotification(
+                window,
+                &GUID_CONSOLE_DISPLAY_STATE,
+                DEVICE_NOTIFY_WINDOW_HANDLE.0,
+            )
+        }?;
+
         debug!("registering key event hook...");
         let key_hook =
             unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(handle_key_event), module, 0)? };
@@ -160,8 +177,8 @@ impl Window {
     }
 }
 
-fn send_event(event_tx: Sender<Event>, event: Event) {
-    debug!("got event: {event}");
+fn send_event(event_tx: EventTx, event: Event) {
+    trace!("got event: {event}");
     if let Err(e) = event_tx.blocking_send(event) {
         error!("failed to send event {event}: {e}");
     };
@@ -199,9 +216,23 @@ extern "system" fn handle_window_event(
 
             let event_tx = window_data.event_tx.clone();
 
+            const DISPLAY_OFF: u8 = 0;
             match wparam.0 as u32 {
                 PBT_APMRESUMEAUTOMATIC => send_event(event_tx, Event::Resume),
                 PBT_APMSUSPEND => send_event(event_tx, Event::Suspend),
+                PBT_POWERSETTINGCHANGE => {
+                    let power_settings = unsafe {
+                        std::mem::transmute::<LPARAM, *const POWERBROADCAST_SETTING>(lparam)
+                    };
+
+                    if !power_settings.is_null()
+                        && let power_settings = unsafe { *power_settings }
+                        && power_settings.PowerSetting == GUID_CONSOLE_DISPLAY_STATE
+                        && power_settings.Data[0] == DISPLAY_OFF
+                    {
+                        send_event(event_tx, Event::Suspend)
+                    }
+                }
                 _ => {}
             }
         }
@@ -217,7 +248,8 @@ extern "system" fn handle_key_event(ncode: i32, wparam: WPARAM, lparam: LPARAM) 
     }
 
     let event = unsafe { std::mem::transmute::<LPARAM, *const KBDLLHOOKSTRUCT>(lparam) };
-    if event.is_null() {
+    let msg_sender_is_self = !event.is_null();
+    if !msg_sender_is_self {
         return unsafe { CallNextHookEx(None, ncode, wparam, lparam) };
     }
 
@@ -254,7 +286,7 @@ extern "system" fn handle_key_event(ncode: i32, wparam: WPARAM, lparam: LPARAM) 
                 send_event(event_tx, Event::VolumeMute);
                 return LRESULT(1);
             }
-            _ => {}
+            _ => send_event(event_tx, Event::UserActivity),
         }
     }
 
