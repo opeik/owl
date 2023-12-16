@@ -3,8 +3,8 @@ use std::{future::Future, thread::JoinHandle};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-pub type EventTx = mpsc::Sender<Event>;
-pub type EventRx = mpsc::Receiver<Event>;
+pub type EventTx = mpsc::UnboundedSender<Event>;
+pub type EventRx = mpsc::UnboundedReceiver<Event>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, derive_more::Display)]
 pub enum Event {

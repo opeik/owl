@@ -26,7 +26,7 @@ use std::{
 };
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, trace};
+use tracing::{debug, error, trace};
 use windows::{
     core::PCWSTR,
     Win32::{
@@ -69,7 +69,7 @@ impl Hash for WindowHandle {
 
 impl super::Spawn for Job {
     fn spawn(cancel_token: CancellationToken) -> (JoinHandle<Result<()>>, Self) {
-        let (event_tx, event_rx) = mpsc::channel::<Event>(32);
+        let (event_tx, event_rx) = mpsc::unbounded_channel::<Event>();
 
         debug!("spawning os job...");
         let handle = thread::spawn(move || {
@@ -152,7 +152,7 @@ impl Window {
             )
         };
 
-        let foo = unsafe {
+        let power_notify = unsafe {
             RegisterPowerSettingNotification(
                 window,
                 &GUID_CONSOLE_DISPLAY_STATE,
@@ -179,7 +179,7 @@ impl Window {
 
 fn send_event(event_tx: EventTx, event: Event) {
     trace!("got event: {event}");
-    if let Err(e) = event_tx.blocking_send(event) {
+    if let Err(e) = event_tx.send(event) {
         error!("failed to send event {event}: {e}");
     };
 }
