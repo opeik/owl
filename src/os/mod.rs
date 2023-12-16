@@ -1,7 +1,4 @@
-use color_eyre::Result;
-use std::{future::Future, thread::JoinHandle};
 use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
 
 pub type EventTx = mpsc::UnboundedSender<Event>;
 pub type EventRx = mpsc::UnboundedReceiver<Event>;
@@ -13,12 +10,7 @@ pub enum Event {
     VolumeUp,
     VolumeDown,
     VolumeMute,
-    UserActivity,
-}
-
-pub trait Spawn {
-    fn spawn(cancel_token: CancellationToken) -> (JoinHandle<Result<()>>, Self);
-    fn recv_event(&mut self) -> impl Future<Output = Result<Event>> + Send;
+    Focus,
 }
 
 cfg_if::cfg_if! {

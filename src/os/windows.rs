@@ -1,99 +1,95 @@
-use super::{Event, EventRx, EventTx};
-use ::windows::{
-    core::w,
+use std::{sync::OnceLock, thread};
+
+use color_eyre::eyre::{eyre, Result};
+use tokio::sync::{mpsc, oneshot};
+use tokio_util::sync::CancellationToken;
+use tracing::{debug, error, trace};
+use windows::{
+    core::{w, PCWSTR},
     Win32::{
-        Foundation::{HWND, LPARAM, LRESULT, WPARAM},
-        Graphics::Gdi::ValidateRect,
-        System::LibraryLoader::GetModuleHandleW,
+        Foundation::{HMODULE, HWND, LPARAM, LRESULT, WPARAM},
+        System::{
+            LibraryLoader::GetModuleHandleW,
+            Power::{
+                RegisterPowerSettingNotification, UnregisterPowerSettingNotification, HPOWERNOTIFY,
+                POWERBROADCAST_SETTING,
+            },
+            SystemServices::GUID_CONSOLE_DISPLAY_STATE,
+        },
         UI::{
             Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP},
             WindowsAndMessaging::{
-                CallNextHookEx, CreateWindowExW, DefWindowProcW, DispatchMessageW, PostQuitMessage,
-                RegisterClassW, SetWindowsHookExW, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
-                HC_ACTION, KBDLLHOOKSTRUCT, MSG, PBT_APMRESUMEAUTOMATIC, PBT_APMSUSPEND,
-                WH_KEYBOARD_LL, WINDOW_EX_STYLE, WM_DESTROY, WM_KEYDOWN, WM_PAINT,
-                WM_POWERBROADCAST, WNDCLASSW, WS_DISABLED,
+                CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
+                GetMessageW, PostMessageW, PostQuitMessage, RegisterClassW, SetWindowsHookExW,
+                UnhookWindowsHookEx, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
+                DEVICE_NOTIFY_WINDOW_HANDLE, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG,
+                PBT_APMRESUMEAUTOMATIC, PBT_APMSUSPEND, PBT_POWERSETTINGCHANGE, WH_KEYBOARD_LL,
+                WINDOW_EX_STYLE, WM_CLOSE, WM_DESTROY, WM_KEYDOWN, WM_POWERBROADCAST, WNDCLASSW,
+                WS_DISABLED,
             },
         },
     },
 };
-use color_eyre::eyre::{eyre, Result};
-use std::{
-    hash::{Hash, Hasher},
-    sync::{Arc, OnceLock, RwLock},
-    thread::{self, JoinHandle},
-    time::Duration,
-};
-use tokio::sync::mpsc;
-use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, trace};
-use windows::{
-    core::PCWSTR,
-    Win32::{
-        Foundation::HMODULE,
-        System::{
-            Power::{RegisterPowerSettingNotification, POWERBROADCAST_SETTING},
-            SystemServices::GUID_CONSOLE_DISPLAY_STATE,
-        },
-        UI::WindowsAndMessaging::{
-            PeekMessageW, DEVICE_NOTIFY_WINDOW_HANDLE, HHOOK, PBT_POWERSETTINGCHANGE, PM_REMOVE,
-        },
-    },
+
+use crate::{
+    job::{RecvJob, SpawnResult},
+    os::{Event, EventRx, EventTx},
+    Spawn,
 };
 
-static JOB_DATA: OnceLock<Arc<RwLock<JobData>>> = OnceLock::new();
+static HOOK: OnceLock<Hook> = OnceLock::new();
 
 pub struct Job {
     event_rx: EventRx,
 }
 
-struct JobData {
+struct Hook {
     event_tx: EventTx,
 }
 
-#[allow(dead_code)]
+#[derive(Debug)]
 struct Window {
-    module: HMODULE,
     window: HWND,
     key_hook: HHOOK,
+    power_notify: HPOWERNOTIFY,
 }
 
-#[derive(Eq, PartialEq)]
-struct WindowHandle(pub HWND);
-
-impl Hash for WindowHandle {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0 .0.hash(state);
-    }
-}
-
-impl super::Spawn for Job {
-    fn spawn(cancel_token: CancellationToken) -> (JoinHandle<Result<()>>, Self) {
+impl Spawn for Job {
+    async fn spawn(cancel_token: CancellationToken) -> SpawnResult<Self> {
         let (event_tx, event_rx) = mpsc::unbounded_channel::<Event>();
+        let (window_tx, window_rx) = oneshot::channel::<Window>();
 
         debug!("spawning os job...");
-        let handle = thread::spawn(move || {
+        let join_handle = thread::spawn(move || {
             debug!("os job started!");
-            let _window = Window::new(event_tx.clone())?;
+
+            // Windows will get mad if you try to use resources outside the thread it was created.
+            // Fortunately, the `Drop` implementation sidesteps this with message passing. So,
+            // create the window in the job thread then send it back to async land.
+            let window = Window::new(event_tx.clone())?;
+            window_tx
+                .send(window)
+                .map_err(|_| eyre!("failed to send window"))?;
             debug!("os job ready!");
 
-            loop {
-                if cancel_token.is_cancelled() {
-                    debug!("stopping os job...");
-                    break;
-                }
+            event_loop();
 
-                poll_window_event();
-                std::thread::sleep(Duration::from_micros(100));
-            }
-
-            Ok(())
+            Result::Ok(())
         });
 
-        (handle, Self { event_rx })
-    }
+        // Dropping the `Window` will stop the event loop, saving us having to poll.
+        let window = window_rx.await?;
+        let _watchdog = tokio::spawn(async move {
+            cancel_token.cancelled().await;
+            drop(window);
+        });
 
-    async fn recv_event(&mut self) -> Result<Event> {
+        Ok((join_handle, Self { event_rx }))
+    }
+}
+
+impl RecvJob<Event> for Job {
+    async fn recv(&mut self) -> Result<Event> {
         self.event_rx
             .recv()
             .await
@@ -101,30 +97,52 @@ impl super::Spawn for Job {
     }
 }
 
-fn poll_window_event() {
+fn event_loop() {
     let mut message = MSG::default();
-    let found_msg = unsafe { PeekMessageW(&mut message, None, 0, 0, PM_REMOVE) }.into();
-    if found_msg {
-        unsafe { DispatchMessageW(&message) };
+    unsafe {
+        while GetMessageW(&mut message, None, 0, 0).into() {
+            DispatchMessageW(&message);
+        }
     }
 }
 
 impl Window {
-    fn new(event_tx: EventTx) -> Result<Self> {
-        const WINDOW_CLASS: PCWSTR = w!("window");
+    const WINDOW_CLASS: PCWSTR = w!("window");
+
+    pub fn new(event_tx: EventTx) -> Result<Self> {
+        HOOK.set(Hook { event_tx })
+            .map_err(|_| eyre!("failed to set hook"))?;
 
         debug!("creating window...");
+        let module = Self::module_handle()?;
+        let _window_class = Self::new_window_class(module)?;
+        let window = Self::new_window(module)?;
+        let key_hook = Self::new_key_hook(module)?;
+        let power_notify = Self::new_power_notify(window)?;
+        debug!("window created!");
+
+        Ok(Self {
+            window,
+            key_hook,
+            power_notify,
+        })
+    }
+
+    fn module_handle() -> Result<HMODULE> {
         debug!("getting module handle...");
         let module = unsafe { GetModuleHandleW(None)? };
         if module.0 == 0 {
             return Err(eyre!("failed to get module handle"));
         }
+        Ok(module)
+    }
 
+    fn new_window_class(module: HMODULE) -> Result<WNDCLASSW> {
         debug!("registering window class...");
         let window_class = WNDCLASSW {
             hInstance: module.into(),
             style: CS_HREDRAW | CS_VREDRAW,
-            lpszClassName: WINDOW_CLASS,
+            lpszClassName: Self::WINDOW_CLASS,
             lpfnWndProc: Some(handle_window_event),
             ..Default::default()
         };
@@ -134,11 +152,15 @@ impl Window {
             return Err(eyre!("failed to register class"));
         }
 
+        Ok(window_class)
+    }
+
+    fn new_window(module: HMODULE) -> Result<HWND> {
         debug!("creating window...");
         let window = unsafe {
             CreateWindowExW(
                 WINDOW_EX_STYLE::default(),
-                WINDOW_CLASS,
+                Self::WINDOW_CLASS,
                 w!("owl"),
                 WS_DISABLED,
                 CW_USEDEFAULT,
@@ -152,6 +174,11 @@ impl Window {
             )
         };
 
+        Ok(window)
+    }
+
+    fn new_power_notify(window: HWND) -> Result<HPOWERNOTIFY> {
+        debug!("registering for power notifications...");
         let power_notify = unsafe {
             RegisterPowerSettingNotification(
                 window,
@@ -160,20 +187,37 @@ impl Window {
             )
         }?;
 
+        Ok(power_notify)
+    }
+
+    fn new_key_hook(module: HMODULE) -> Result<HHOOK> {
         debug!("registering key event hook...");
         let key_hook =
             unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(handle_key_event), module, 0)? };
 
-        JOB_DATA
-            .set(Arc::new(RwLock::new(JobData { event_tx })))
-            .map_err(|_| eyre!("failed to set window data"))?;
+        Ok(key_hook)
+    }
+}
 
-        debug!("window created!");
-        Ok(Self {
-            module,
-            window,
-            key_hook,
-        })
+impl Drop for Window {
+    fn drop(&mut self) {
+        fn inner(window: &mut Window) -> Result<()> {
+            unsafe {
+                PostMessageW(
+                    window.window,
+                    WM_CLOSE,
+                    WPARAM::default(),
+                    LPARAM::default(),
+                )?;
+                UnregisterPowerSettingNotification(window.power_notify)?;
+                UnhookWindowsHookEx(window.key_hook)?;
+                Ok(())
+            }
+        }
+
+        if let Err(e) = inner(self) {
+            error!("failed to drop window: {e}");
+        }
     }
 }
 
@@ -184,38 +228,41 @@ fn send_event(event_tx: EventTx, event: Event) {
     };
 }
 
+macro_rules! get_hook {
+    ($on_err:expr) => {
+        match HOOK.get() {
+            Some(x) => Hook {
+                event_tx: x.event_tx.clone(),
+            },
+            None => {
+                error!("hook unset");
+                return { $on_err() };
+            }
+        }
+    };
+}
+
 extern "system" fn handle_window_event(
     window: HWND,
     message: u32,
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    let forward_event = || unsafe { DefWindowProcW(window, message, wparam, lparam) };
+    let Hook { event_tx } = get_hook!(forward_event);
+
     match message {
-        WM_PAINT => {
-            unsafe { ValidateRect(window, None) };
+        WM_CLOSE => {
+            trace!("got WM_CLOSE");
+            unsafe { DestroyWindow(window).expect("failed to destroy window") };
             return LRESULT(0);
         }
         WM_DESTROY => {
+            trace!("got WM_DESTROY");
             unsafe { PostQuitMessage(0) };
             return LRESULT(0);
         }
         WM_POWERBROADCAST => {
-            let window_data = match JOB_DATA.get() {
-                Some(outer) => match outer.read() {
-                    Ok(inner) => inner,
-                    Err(e) => {
-                        error!("failed to acquire window data lock: {e:?}");
-                        return unsafe { DefWindowProcW(window, message, wparam, lparam) };
-                    }
-                },
-                None => {
-                    error!("window data uninitialized");
-                    return unsafe { DefWindowProcW(window, message, wparam, lparam) };
-                }
-            };
-
-            let event_tx = window_data.event_tx.clone();
-
             const DISPLAY_OFF: u8 = 0;
             match wparam.0 as u32 {
                 PBT_APMRESUMEAUTOMATIC => send_event(event_tx, Event::Resume),
@@ -239,40 +286,26 @@ extern "system" fn handle_window_event(
         _ => {}
     };
 
-    unsafe { DefWindowProcW(window, message, wparam, lparam) }
+    forward_event()
 }
 
 extern "system" fn handle_key_event(ncode: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    let forward_event = || unsafe { CallNextHookEx(None, ncode, wparam, lparam) };
+    let Hook { event_tx } = get_hook!(forward_event);
+
     if ncode < 0 || ncode != HC_ACTION as i32 {
-        return unsafe { CallNextHookEx(None, ncode, wparam, lparam) };
+        return forward_event();
     }
 
     let event = unsafe { std::mem::transmute::<LPARAM, *const KBDLLHOOKSTRUCT>(lparam) };
     let msg_sender_is_self = !event.is_null();
     if !msg_sender_is_self {
-        return unsafe { CallNextHookEx(None, ncode, wparam, lparam) };
+        return forward_event();
     }
 
     // Returning `LRESULT(1)` here "eats" the key event.
     if wparam.0 as u32 == WM_KEYDOWN {
         let key = VIRTUAL_KEY(unsafe { (*event).vkCode as _ });
-
-        let window_data = match JOB_DATA.get() {
-            Some(outer) => match outer.read() {
-                Ok(inner) => inner,
-                Err(e) => {
-                    error!("failed to acquire window data lock: {e:?}");
-                    return unsafe { CallNextHookEx(None, ncode, wparam, lparam) };
-                }
-            },
-            None => {
-                error!("window data uninitialized");
-                return unsafe { CallNextHookEx(None, ncode, wparam, lparam) };
-            }
-        };
-
-        let event_tx = window_data.event_tx.clone();
-
         match key {
             VK_VOLUME_UP => {
                 send_event(event_tx, Event::VolumeUp);
@@ -286,9 +319,11 @@ extern "system" fn handle_key_event(ncode: i32, wparam: WPARAM, lparam: LPARAM) 
                 send_event(event_tx, Event::VolumeMute);
                 return LRESULT(1);
             }
-            _ => send_event(event_tx, Event::UserActivity),
+            _ => send_event(event_tx, Event::Focus),
         }
     }
 
-    unsafe { CallNextHookEx(None, ncode, wparam, lparam) }
+    forward_event()
 }
+
+unsafe impl Send for Window {}

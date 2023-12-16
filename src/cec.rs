@@ -1,17 +1,23 @@
-use crate::os::Event;
+use std::{
+    collections::HashMap,
+    thread,
+    time::{Duration, Instant},
+};
+
 use cec_rs::{
     CecCommand, CecConnection, CecConnectionCfgBuilder, CecDeviceType, CecDeviceTypeVec,
     CecKeypress, CecLogMessage, CecLogicalAddress, CecPowerStatus, CecVersion,
 };
 use color_eyre::eyre::{Context, Result};
-use std::{
-    collections::HashMap,
-    thread::{self, JoinHandle},
-    time::{Duration, Instant},
-};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
+
+use crate::{
+    job::{SendJob, SpawnResult},
+    os::Event,
+    Spawn,
+};
 
 pub type CommandTx = mpsc::Sender<Command>;
 pub type CommandRx = mpsc::Receiver<Command>;
@@ -59,8 +65,8 @@ impl Command {
     }
 }
 
-impl Job {
-    pub fn spawn(cancel_token: CancellationToken) -> (JoinHandle<Result<()>>, Self) {
+impl Spawn for Job {
+    async fn spawn(cancel_token: CancellationToken) -> SpawnResult<Self> {
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(8);
 
         debug!("spawning cec job...");
@@ -79,16 +85,18 @@ impl Job {
                 }
 
                 handle_cmd(&cec, &mut cmd_rx, &mut last_cmd);
-                std::thread::sleep(Duration::from_micros(100));
+                std::thread::sleep(Duration::from_millis(1));
             }
 
             Ok(())
         });
 
-        (handle, Self { cmd_tx })
+        Ok((handle, Self { cmd_tx }))
     }
+}
 
-    pub async fn send_cmd(&self, cmd: Command) -> Result<()> {
+impl SendJob<Command> for Job {
+    async fn send(&self, cmd: Command) -> Result<()> {
         Ok(self.cmd_tx.send(cmd).await?)
     }
 }
@@ -163,7 +171,7 @@ impl From<Event> for Command {
             Event::VolumeUp => Command::VolumeUp,
             Event::VolumeDown => Command::VolumeDown,
             Event::VolumeMute => Command::VolumeMute,
-            Event::UserActivity => Command::Focus,
+            Event::Focus => Command::Focus,
         }
     }
 }
