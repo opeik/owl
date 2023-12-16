@@ -131,7 +131,7 @@ impl Window {
     fn module_handle() -> Result<HMODULE> {
         debug!("getting module handle...");
         let module = unsafe { GetModuleHandleW(None)? };
-        if module.0 == 0 {
+        if (module.0 as *const isize).is_null() {
             return Err(eyre!("failed to get module handle"));
         }
         Ok(module)
@@ -174,28 +174,34 @@ impl Window {
             )
         };
 
+        if (window.0 as *const isize).is_null() {
+            return Err(eyre!("failed to create window"));
+        }
+
         Ok(window)
     }
 
     fn new_power_notify(window: HWND) -> Result<HPOWERNOTIFY> {
         debug!("registering for power notifications...");
-        let power_notify = unsafe {
+        Ok(unsafe {
             RegisterPowerSettingNotification(
                 window,
                 &GUID_CONSOLE_DISPLAY_STATE,
                 DEVICE_NOTIFY_WINDOW_HANDLE.0,
             )
-        }?;
-
-        Ok(power_notify)
+        }?)
     }
 
     fn new_key_hook(module: HMODULE) -> Result<HHOOK> {
         debug!("registering key event hook...");
-        let key_hook =
-            unsafe { SetWindowsHookExW(WH_KEYBOARD_LL, Some(handle_key_event), module, 0)? };
-
-        Ok(key_hook)
+        unsafe {
+            Ok(SetWindowsHookExW(
+                WH_KEYBOARD_LL,
+                Some(handle_key_event),
+                module,
+                0,
+            )?)
+        }
     }
 }
 
@@ -248,82 +254,81 @@ extern "system" fn handle_window_event(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
-    let forward_event = || unsafe { DefWindowProcW(window, message, wparam, lparam) };
-    let Hook { event_tx } = get_hook!(forward_event);
+    const DISPLAY_OFF: u8 = 0;
+
+    let defer = || unsafe { DefWindowProcW(window, message, wparam, lparam) };
+    let ok = || LRESULT(0);
+    let Hook { event_tx } = get_hook!(defer);
 
     match message {
         WM_CLOSE => {
             trace!("got WM_CLOSE");
             unsafe { DestroyWindow(window).expect("failed to destroy window") };
-            return LRESULT(0);
+            return ok();
         }
         WM_DESTROY => {
             trace!("got WM_DESTROY");
             unsafe { PostQuitMessage(0) };
-            return LRESULT(0);
+            return ok();
         }
-        WM_POWERBROADCAST => {
-            const DISPLAY_OFF: u8 = 0;
-            match wparam.0 as u32 {
-                PBT_APMRESUMEAUTOMATIC => send_event(event_tx, Event::Resume),
-                PBT_APMSUSPEND => send_event(event_tx, Event::Suspend),
-                PBT_POWERSETTINGCHANGE => {
-                    let power_settings = unsafe {
-                        std::mem::transmute::<LPARAM, *const POWERBROADCAST_SETTING>(lparam)
-                    };
+        WM_POWERBROADCAST => match wparam.0 as u32 {
+            PBT_APMRESUMEAUTOMATIC => send_event(event_tx, Event::Resume),
+            PBT_APMSUSPEND => send_event(event_tx, Event::Suspend),
+            PBT_POWERSETTINGCHANGE => {
+                let power_settings =
+                    unsafe { std::mem::transmute::<LPARAM, *const POWERBROADCAST_SETTING>(lparam) };
 
-                    if !power_settings.is_null()
-                        && let power_settings = unsafe { *power_settings }
-                        && power_settings.PowerSetting == GUID_CONSOLE_DISPLAY_STATE
-                        && power_settings.Data[0] == DISPLAY_OFF
-                    {
-                        send_event(event_tx, Event::Suspend)
-                    }
+                if !power_settings.is_null()
+                    && let power_settings = unsafe { *power_settings }
+                    && power_settings.PowerSetting == GUID_CONSOLE_DISPLAY_STATE
+                    && power_settings.Data[0] == DISPLAY_OFF
+                {
+                    send_event(event_tx, Event::Suspend)
                 }
-                _ => {}
             }
-        }
+            _ => {}
+        },
         _ => {}
     };
 
-    forward_event()
+    defer()
 }
 
 extern "system" fn handle_key_event(ncode: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    let forward_event = || unsafe { CallNextHookEx(None, ncode, wparam, lparam) };
-    let Hook { event_tx } = get_hook!(forward_event);
+    let defer = || unsafe { CallNextHookEx(None, ncode, wparam, lparam) };
+    let suppress = || LRESULT(1);
 
+    // Bail if this isn't a keyboard event.
     if ncode < 0 || ncode != HC_ACTION as i32 {
-        return forward_event();
+        return defer();
     }
 
+    let Hook { event_tx } = get_hook!(defer);
     let event = unsafe { std::mem::transmute::<LPARAM, *const KBDLLHOOKSTRUCT>(lparam) };
-    let msg_sender_is_self = !event.is_null();
-    if !msg_sender_is_self {
-        return forward_event();
+    if event.is_null() {
+        return defer();
     }
 
-    // Returning `LRESULT(1)` here "eats" the key event.
     if wparam.0 as u32 == WM_KEYDOWN {
         let key = VIRTUAL_KEY(unsafe { (*event).vkCode as _ });
         match key {
             VK_VOLUME_UP => {
                 send_event(event_tx, Event::VolumeUp);
-                return LRESULT(1);
+                return suppress();
             }
             VK_VOLUME_DOWN => {
                 send_event(event_tx, Event::VolumeDown);
-                return LRESULT(1);
+                return suppress();
             }
             VK_VOLUME_MUTE => {
                 send_event(event_tx, Event::VolumeMute);
-                return LRESULT(1);
+                return suppress();
             }
             _ => send_event(event_tx, Event::Focus),
         }
     }
 
-    forward_event()
+    defer()
 }
 
 unsafe impl Send for Window {}
