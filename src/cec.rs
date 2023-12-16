@@ -163,7 +163,7 @@ impl From<Event> for Command {
             Event::VolumeUp => Command::VolumeUp,
             Event::VolumeDown => Command::VolumeDown,
             Event::VolumeMute => Command::VolumeMute,
-            Event::UserActivity => Command::Focus,
+            Event::KeyDown => Command::Focus,
         }
     }
 }

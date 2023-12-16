@@ -11,7 +11,7 @@ async fn main() -> Result<()> {
     info!("starting owl...");
     let is_running = CancellationToken::new();
     let (cec_thread, cec_job) = cec::Job::spawn(is_running.clone());
-    let (os_thread, mut os_job) = os::Job::spawn(is_running.clone());
+    let (os_thread, mut os_job) = os::Task::spawn(is_running.clone());
     let job_threads = [cec_thread, os_thread];
 
     let owl_task = tokio::spawn(async move {

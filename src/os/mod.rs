@@ -3,8 +3,8 @@ use std::{future::Future, thread::JoinHandle};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
 
-pub type EventTx = mpsc::Sender<Event>;
-pub type EventRx = mpsc::Receiver<Event>;
+pub type EventTx = mpsc::UnboundedSender<Event>;
+pub type EventRx = mpsc::UnboundedReceiver<Event>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, derive_more::Display)]
 pub enum Event {
@@ -13,7 +13,7 @@ pub enum Event {
     VolumeUp,
     VolumeDown,
     VolumeMute,
-    UserActivity,
+    KeyDown,
 }
 
 pub trait Spawn {
@@ -24,6 +24,6 @@ pub trait Spawn {
 cfg_if::cfg_if! {
     if #[cfg(target_os = "windows")] {
         pub mod windows;
-        pub use windows::Job;
+        pub use windows::Task;
     }
 }
