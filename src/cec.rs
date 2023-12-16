@@ -66,20 +66,20 @@ impl Command {
 }
 
 impl Spawn for Job {
-    async fn spawn(cancel_token: CancellationToken) -> SpawnResult<Self> {
+    async fn spawn(run_token: CancellationToken) -> SpawnResult<Self> {
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(8);
 
         debug!("spawning cec job...");
         let handle = thread::spawn(move || {
             debug!("cec job started!");
 
-            let cancel_token = cancel_token;
+            let run_token = run_token;
             let cec = Cec::new()?;
             let mut last_cmd = LastCmd::new();
             debug!("cec job ready!");
 
             loop {
-                if cancel_token.is_cancelled() {
+                if run_token.is_cancelled() {
                     debug!("stopping cec job...");
                     break;
                 }

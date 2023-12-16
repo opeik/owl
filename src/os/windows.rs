@@ -1,4 +1,4 @@
-use std::{sync::OnceLock, thread};
+use std::{mem::transmute, sync::OnceLock, thread};
 
 use color_eyre::eyre::{eyre, Result};
 use tokio::sync::{mpsc, oneshot};
@@ -37,6 +37,20 @@ use crate::{
     Spawn,
 };
 
+macro_rules! get_hook {
+    ($on_err:expr) => {
+        match HOOK.get() {
+            Some(x) => Hook {
+                event_tx: x.event_tx.clone(),
+            },
+            None => {
+                error!("hook unset");
+                return { $on_err() };
+            }
+        }
+    };
+}
+
 static HOOK: OnceLock<Hook> = OnceLock::new();
 
 pub struct Job {
@@ -54,8 +68,14 @@ struct Window {
     power_notify: HPOWERNOTIFY,
 }
 
+#[derive(derive_more::Deref)]
+struct PowerSettings(pub POWERBROADCAST_SETTING);
+
+#[derive(derive_more::Deref)]
+struct KeyEvent(pub KBDLLHOOKSTRUCT);
+
 impl Spawn for Job {
-    async fn spawn(cancel_token: CancellationToken) -> SpawnResult<Self> {
+    async fn spawn(run_token: CancellationToken) -> SpawnResult<Self> {
         let (event_tx, event_rx) = mpsc::unbounded_channel::<Event>();
         let (window_tx, window_rx) = oneshot::channel::<Window>();
 
@@ -80,7 +100,7 @@ impl Spawn for Job {
         // Dropping the `Window` will stop the event loop, saving us having to poll.
         let window = window_rx.await?;
         let _watchdog = tokio::spawn(async move {
-            cancel_token.cancelled().await;
+            run_token.cancelled().await;
             drop(window);
         });
 
@@ -234,18 +254,30 @@ fn send_event(event_tx: EventTx, event: Event) {
     };
 }
 
-macro_rules! get_hook {
-    ($on_err:expr) => {
-        match HOOK.get() {
-            Some(x) => Hook {
-                event_tx: x.event_tx.clone(),
-            },
-            None => {
-                error!("hook unset");
-                return { $on_err() };
-            }
+impl TryFrom<LPARAM> for PowerSettings {
+    type Error = color_eyre::eyre::Error;
+
+    fn try_from(value: LPARAM) -> Result<PowerSettings> {
+        let power_settings = unsafe { transmute::<LPARAM, *const POWERBROADCAST_SETTING>(value) };
+        if !power_settings.is_null() {
+            return Err(eyre!("null power settings"));
         }
-    };
+
+        Ok(PowerSettings(unsafe { *power_settings }))
+    }
+}
+
+impl TryFrom<LPARAM> for KeyEvent {
+    type Error = color_eyre::eyre::Error;
+
+    fn try_from(value: LPARAM) -> std::prelude::v1::Result<Self, Self::Error> {
+        let event = unsafe { transmute::<LPARAM, *const KBDLLHOOKSTRUCT>(value) };
+        if event.is_null() {
+            return Err(eyre!("null key event"));
+        }
+
+        Ok(KeyEvent(unsafe { *event }))
+    }
 }
 
 extern "system" fn handle_window_event(
@@ -275,13 +307,9 @@ extern "system" fn handle_window_event(
             PBT_APMRESUMEAUTOMATIC => send_event(event_tx, Event::Resume),
             PBT_APMSUSPEND => send_event(event_tx, Event::Suspend),
             PBT_POWERSETTINGCHANGE => {
-                let power_settings =
-                    unsafe { std::mem::transmute::<LPARAM, *const POWERBROADCAST_SETTING>(lparam) };
-
-                if !power_settings.is_null()
-                    && let power_settings = unsafe { *power_settings }
-                    && power_settings.PowerSetting == GUID_CONSOLE_DISPLAY_STATE
-                    && power_settings.Data[0] == DISPLAY_OFF
+                if let Ok(x) = PowerSettings::try_from(lparam)
+                    && x.PowerSetting == GUID_CONSOLE_DISPLAY_STATE
+                    && x.Data[0] == DISPLAY_OFF
                 {
                     send_event(event_tx, Event::Suspend)
                 }
@@ -304,13 +332,16 @@ extern "system" fn handle_key_event(ncode: i32, wparam: WPARAM, lparam: LPARAM) 
     }
 
     let Hook { event_tx } = get_hook!(defer);
-    let event = unsafe { std::mem::transmute::<LPARAM, *const KBDLLHOOKSTRUCT>(lparam) };
-    if event.is_null() {
-        return defer();
-    }
+    let event = match KeyEvent::try_from(lparam) {
+        Ok(x) => x,
+        Err(e) => {
+            error!("failed to convert key event: {e}");
+            return defer();
+        }
+    };
 
     if wparam.0 as u32 == WM_KEYDOWN {
-        let key = VIRTUAL_KEY(unsafe { (*event).vkCode as _ });
+        let key = VIRTUAL_KEY(event.vkCode as _);
         match key {
             VK_VOLUME_UP => {
                 send_event(event_tx, Event::VolumeUp);

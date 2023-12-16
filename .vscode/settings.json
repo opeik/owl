@@ -4,6 +4,7 @@
         "APMSUSPEND",
         "HHOOK",
         "HMODULE",
+        "HPOWERNOTIFY",
         "HREDRAW",
         "HWND",
         "KBDLLHOOKSTRUCT",

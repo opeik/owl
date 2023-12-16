@@ -2,7 +2,7 @@ use color_eyre::eyre::{eyre, Result};
 use owl::*;
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info};
+use tracing::{error, info};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -12,7 +12,6 @@ async fn main() -> Result<()> {
     let run_token = CancellationToken::new();
     let (cec_thread, cec) = cec::Job::spawn(run_token.clone()).await?;
     let (os_thread, mut os) = os::Job::spawn(run_token.clone()).await?;
-    let job_threads = [cec_thread, os_thread];
 
     let owl_task = tokio::spawn(async move {
         while let Ok(event) = os.recv().await {
@@ -23,20 +22,13 @@ async fn main() -> Result<()> {
     });
 
     tokio::select! {
-        _ = signal::ctrl_c() => {
-            info!("stopping owl...");
-            run_token.cancel();
-        }
-        _ = run_token.cancelled() => {
-            debug!("stop requested...")
-        }
-        _ = owl_task => {
-            error!("owl stopped unexpectedly?!");
-        }
+        _ = signal::ctrl_c() => run_token.cancel(),
+        _ = owl_task => error!("owl stopped unexpectedly?!"),
+        _ = run_token.cancelled() => {},
     }
 
-    info!("waiting for jobs to stop...");
-    for thread in job_threads {
+    info!("stopping owl...");
+    for thread in [cec_thread, os_thread] {
         thread
             .join()
             .map_err(|e| eyre!("failed to join thread: {e:?}"))??;
