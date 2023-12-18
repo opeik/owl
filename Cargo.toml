@@ -1,5 +1,5 @@
 [workspace]
-members = ["libcec-sys"]
+members = ["libcec-sys", "libcec"]
 resolver = "2"
 
 [profile.dev.package.backtrace]
