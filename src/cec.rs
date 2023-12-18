@@ -145,7 +145,8 @@ fn debounce_cmd(cmd: Command, time_by_cmd: &mut HashMap<Command, Instant>) -> Op
 impl Cec {
     pub fn new() -> Result<Self> {
         let cfg = CecConnectionCfgBuilder::default()
-            .device_name("cec-rs".to_owned())
+            .autodetect(true)
+            .device_name("owl".to_owned())
             .device_types(CecDeviceTypeVec::new(CecDeviceType::RecordingDevice))
             .activate_source(false)
             .key_press_callback(Box::new(on_key_press))
@@ -156,7 +157,7 @@ impl Cec {
             .context("invalid cec config")?;
 
         debug!("connecting to cec...");
-        let cec = cfg.autodetect().context("failed to connect to cec")?;
+        let cec = cfg.open().context("failed to connect to cec")?;
         info!("connected to cec!");
 
         Ok(Self(cec))

@@ -1,10 +1,31 @@
-[workspace]
-members = ["libcec-sys", "libcec"]
-resolver = "2"
+[package]
+name = "owl"
+version = "0.1.0"
+edition = "2021"
 
-[profile.dev.package.backtrace]
-opt-level = 3
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-# [patch.crates-io]
-# libcec-sys = { path = "../libcec-sys" }
-# cec-rs = { path = ".rg./cec-rs" }
+[dependencies]
+windows = { version = "0.52", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Services",
+    "Win32_System_SystemServices",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_Power",
+    "Win32_UI_Input",
+    "Win32_Devices_HumanInterfaceDevice",
+    "Win32_UI_Input_KeyboardAndMouse",
+] }
+cec-rs = "7.1.2-alpha.0"
+libcec-sys = "4"
+color-eyre = "0.6"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio = { version = "1", features = ["full"] }
+tokio-util = "0.7"
+futures = "0.3"
+derive_more = { version = "=1.0.0-beta.6", features = ["full"] }
+cfg-if = "1"
+tracing-error = "0.2"
