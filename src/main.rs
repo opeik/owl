@@ -41,7 +41,8 @@ fn init_tracing() {
     use tracing_error::ErrorLayer;
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-    let fmt_layer = fmt::layer().without_time();
+    // let fmt_layer = fmt::layer().without_time();
+    let fmt_layer = fmt::layer();
     let filter_layer = EnvFilter::try_from_default_env()
         .or_else(|_| EnvFilter::try_new("owl=trace"))
         .expect("failed to create tracing environment filter");

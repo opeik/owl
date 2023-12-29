@@ -4,10 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use cec_rs::{
-    CecCommand, CecConnection, CecConnectionCfgBuilder, CecDeviceType, CecDeviceTypeVec,
-    CecKeypress, CecLogMessage, CecLogicalAddress, CecPowerStatus, CecVersion,
-};
+use cec::{DeviceKind, LogicalAddress};
 use color_eyre::eyre::{Context, Result};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -45,20 +42,20 @@ struct Device {
     addr: String,
     logical_addr: i32,
     physical_addr: u16,
-    cec_version: CecVersion,
-    power_status: CecPowerStatus,
+    cec_version: cec::Version,
+    power_status: cec::PowerStatus,
     is_active: bool,
 }
 
 #[derive(Debug, derive_more::Deref)]
-struct Cec(CecConnection);
+struct Cec(cec::Connection);
 
 impl Command {
     const fn debounce_duration(&self) -> Option<Duration> {
         match self {
             // In my testing, 180ms was the shortest delay between repeated volume commands
             // that maintained CEC bus responsiveness.
-            Command::VolumeUp | Command::VolumeDown => Some(Duration::from_millis(180)),
+            Command::VolumeUp | Command::VolumeDown => Some(Duration::from_millis(100)),
             Command::Focus => Some(Duration::from_secs(3)),
             _ => None,
         }
@@ -109,12 +106,12 @@ fn handle_cmd(cec: &Cec, cmd_rx: &mut CommandRx, last_cmd: &mut LastCmd) {
     {
         debug!("sending command: {cmd}");
         let result = match cmd {
-            Command::PowerOn => cec.set_active_source(CecDeviceType::PlaybackDevice),
-            Command::PowerOff => cec.send_standby_devices(CecLogicalAddress::Tv),
-            Command::VolumeUp => cec.volume_up(true),
-            Command::VolumeDown => cec.volume_down(true),
+            Command::PowerOn => cec.set_active_source(DeviceKind::PlaybackDevice),
+            Command::PowerOff => cec.send_standby_devices(LogicalAddress::Tv),
+            Command::VolumeUp => cec.volume_up(false),
+            Command::VolumeDown => cec.volume_down(false),
             Command::VolumeMute => cec.audio_toggle_mute(),
-            Command::Focus => cec.set_active_source(CecDeviceType::PlaybackDevice),
+            Command::Focus => cec.set_active_source(DeviceKind::PlaybackDevice),
         };
 
         if let Err(e) = result {
@@ -144,23 +141,22 @@ fn debounce_cmd(cmd: Command, time_by_cmd: &mut HashMap<Command, Instant>) -> Op
 
 impl Cec {
     pub fn new() -> Result<Self> {
-        let cfg = CecConnectionCfgBuilder::default()
-            .autodetect(true)
-            .device_name("owl".to_owned())
-            .device_types(CecDeviceTypeVec::new(CecDeviceType::RecordingDevice))
+        info!("connected to cec...");
+
+        let connection = cec::Connection::builder()
+            .detect_device(true)
+            .name("owl".to_owned())
+            .kind(DeviceKind::RecordingDevice)
             .activate_source(false)
-            .key_press_callback(Box::new(on_key_press))
-            .command_received_callback(Box::new(on_command_received))
-            .log_message_callback(Box::new(on_log_level))
+            .on_key_press(Box::new(on_key_press))
+            .on_command_received(Box::new(on_command_received))
+            .on_log_message(Box::new(on_log_level))
             .hdmi_port(2)
-            .build()
-            .context("invalid cec config")?;
+            .connect()
+            .context("failed to connect to cec")?;
 
-        debug!("connecting to cec...");
-        let cec = cfg.open().context("failed to connect to cec")?;
         info!("connected to cec!");
-
-        Ok(Self(cec))
+        Ok(Self(connection))
     }
 }
 
@@ -177,21 +173,21 @@ impl From<Event> for Command {
     }
 }
 
-pub fn on_key_press(keypress: CecKeypress) {
+pub fn on_key_press(keypress: cec::Keypress) {
     trace!("got: {:?}", keypress);
 }
 
-pub fn on_command_received(command: CecCommand) {
+pub fn on_command_received(command: cec::Cmd) {
     trace!("got: {:?}", command);
 }
 
-pub fn on_log_level(log: CecLogMessage) {
+pub fn on_log_level(log: cec::LogMsg) {
     match log.level {
-        cec_rs::CecLogLevel::Error => error!("{}", log.message),
-        cec_rs::CecLogLevel::Warning => warn!("{}", log.message),
-        cec_rs::CecLogLevel::Notice => trace!("{}", log.message),
-        cec_rs::CecLogLevel::Traffic => trace!("{}", log.message),
-        cec_rs::CecLogLevel::Debug => debug!("{}", log.message),
-        cec_rs::CecLogLevel::All => trace!("{}", log.message),
+        cec::LogLevel::Error => error!("{}", log.message),
+        cec::LogLevel::Warning => warn!("{}", log.message),
+        cec::LogLevel::Notice => trace!("{}", log.message),
+        cec::LogLevel::Traffic => trace!("{}", log.message),
+        cec::LogLevel::Debug => debug!("{}", log.message),
+        cec::LogLevel::All => trace!("{}", log.message),
     }
 }
