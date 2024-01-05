@@ -55,7 +55,7 @@ impl Command {
         match self {
             // In my testing, 180ms was the shortest delay between repeated volume commands
             // that maintained CEC bus responsiveness.
-            Command::VolumeUp | Command::VolumeDown => Some(Duration::from_millis(100)),
+            Command::VolumeUp | Command::VolumeDown => Some(Duration::from_millis(180)),
             Command::Focus => Some(Duration::from_secs(3)),
             _ => None,
         }
@@ -108,8 +108,8 @@ fn handle_cmd(cec: &Cec, cmd_rx: &mut CommandRx, last_cmd: &mut LastCmd) {
         let result = match cmd {
             Command::PowerOn => cec.set_active_source(DeviceKind::PlaybackDevice),
             Command::PowerOff => cec.send_standby_devices(LogicalAddress::Tv),
-            Command::VolumeUp => cec.volume_up(false),
-            Command::VolumeDown => cec.volume_down(false),
+            Command::VolumeUp => cec.volume_up(true),
+            Command::VolumeDown => cec.volume_down(true),
             Command::VolumeMute => cec.audio_toggle_mute(),
             Command::Focus => cec.set_active_source(DeviceKind::PlaybackDevice),
         };
