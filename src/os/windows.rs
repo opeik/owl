@@ -1,6 +1,6 @@
 use std::{mem::transmute, sync::OnceLock, thread};
 
-use color_eyre::eyre::{eyre, Result};
+use color_eyre::eyre::{eyre, Context, Result};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, trace};
@@ -154,7 +154,7 @@ impl Window {
 
     fn module_handle() -> Result<HMODULE> {
         debug!("getting module handle...");
-        let module = unsafe { GetModuleHandleW(None)? };
+        let module = unsafe { GetModuleHandleW(None).context("failed to get module handle")? };
         if (module.0 as *const isize).is_null() {
             return Err(eyre!("failed to get module handle"));
         }
@@ -207,24 +207,21 @@ impl Window {
 
     fn new_power_notify(window: HWND) -> Result<HPOWERNOTIFY> {
         debug!("registering for power notifications...");
-        Ok(unsafe {
+        unsafe {
             RegisterPowerSettingNotification(
                 window,
                 &GUID_CONSOLE_DISPLAY_STATE,
                 DEVICE_NOTIFY_WINDOW_HANDLE,
             )
-        }?)
+            .context("failed to register power notifications")
+        }
     }
 
     fn new_key_hook(module: HMODULE) -> Result<HHOOK> {
         debug!("registering key event hook...");
         unsafe {
-            Ok(SetWindowsHookExW(
-                WH_KEYBOARD_LL,
-                Some(handle_key_event),
-                module,
-                0,
-            )?)
+            SetWindowsHookExW(WH_KEYBOARD_LL, Some(handle_key_event), module, 0)
+                .context("failed to register keyboard hook")
         }
     }
 }
@@ -258,21 +255,6 @@ fn send_event(event_tx: EventTx, event: Event) {
     };
 }
 
-fn key_to_event(key_code: VIRTUAL_KEY, key_state: KeyState) -> Option<Event> {
-    let event = match *key_state {
-        WM_KEYDOWN => Event::Press,
-        WM_KEYUP => Event::Release,
-        _ => return None,
-    };
-
-    match key_code {
-        VK_VOLUME_DOWN => Some(event(Key::VolumeDown)),
-        VK_VOLUME_UP => Some(event(Key::VolumeUp)),
-        VK_VOLUME_MUTE => Some(event(Key::VolumeMute)),
-        _ => Some(Event::Focus),
-    }
-}
-
 impl TryFrom<LPARAM> for PowerSettings {
     type Error = color_eyre::eyre::Error;
 
@@ -289,7 +271,7 @@ impl TryFrom<LPARAM> for PowerSettings {
 impl TryFrom<LPARAM> for KeyEvent {
     type Error = color_eyre::eyre::Error;
 
-    fn try_from(value: LPARAM) -> std::prelude::v1::Result<Self, Self::Error> {
+    fn try_from(value: LPARAM) -> Result<Self, Self::Error> {
         let event = unsafe { transmute::<LPARAM, *const KBDLLHOOKSTRUCT>(value) };
         if event.is_null() {
             return Err(eyre!("null key event"));
@@ -341,9 +323,26 @@ extern "system" fn handle_window_event(
     defer()
 }
 
+fn key_to_event(key_code: VIRTUAL_KEY, key_state: KeyState) -> Option<Event> {
+    let event = match *key_state {
+        WM_KEYDOWN => Event::Press,
+        WM_KEYUP => Event::Release,
+        _ => return None,
+    };
+
+    match key_code {
+        VK_VOLUME_DOWN => Some(event(Key::VolumeDown)),
+        VK_VOLUME_UP => Some(event(Key::VolumeUp)),
+        VK_VOLUME_MUTE => Some(event(Key::VolumeMute)),
+        _ => Some(Event::Focus),
+    }
+}
+
 extern "system" fn handle_key_event(ncode: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     let defer = || unsafe { CallNextHookEx(None, ncode, wparam, lparam) };
     let suppress = || LRESULT(1);
+
+    trace!("ncode: {ncode}, wparam: {wparam:?}, lparam: {lparam:?}");
 
     // Bail if this isn't a keyboard event.
     if ncode < 0 || ncode != HC_ACTION as i32 {
