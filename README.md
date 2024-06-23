@@ -4,10 +4,11 @@
 
 ## Features
 
-- Hardware volume control
-  - Improves audio quality by preventing Windows reducing audio bit depth
-- Quick focus
-    - Pressing any key will switch the HDMI source to the PC
+- Control your HDMI-CEC enabled sound system via Windows
+- Improved audio quality
+  - Using hardware mixing prevents Windows reducing the audio bit-depth
+- Quick source switch
+    - Pressing any key will switch the active source to the PC
 
 ## Setup
 
