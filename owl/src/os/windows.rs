@@ -33,7 +33,7 @@ use windows::{
 
 use super::Key;
 use crate::{
-    job::{RecvJob, SpawnResult},
+    job::{Recv, SpawnResult},
     os::{Event, EventRx, EventTx},
     Spawn,
 };
@@ -64,18 +64,18 @@ struct Hook {
 
 #[derive(Debug)]
 struct Window {
-    window: HWND,
+    handle: HWND,
     key_hook: HHOOK,
     power_notify: HPOWERNOTIFY,
 }
 
-#[derive(Debug, derive_more::Deref)]
+#[derive(Debug, Clone, Copy, derive_more::Deref)]
 struct PowerSettings(pub POWERBROADCAST_SETTING);
 
-#[derive(Debug, derive_more::Deref)]
+#[derive(Debug, Clone, Copy, derive_more::Deref)]
 struct KeyEvent(pub KBDLLHOOKSTRUCT);
 
-#[derive(Debug, derive_more::Deref)]
+#[derive(Debug, Clone, Copy, derive_more::Deref)]
 struct KeyState(pub u32);
 
 impl Spawn for Job {
@@ -112,7 +112,7 @@ impl Spawn for Job {
     }
 }
 
-impl RecvJob<Event> for Job {
+impl Recv<Event> for Job {
     async fn recv(&mut self) -> Result<Event> {
         self.event_rx
             .recv()
@@ -146,7 +146,7 @@ impl Window {
         debug!("window created!");
 
         Ok(Self {
-            window,
+            handle: window,
             key_hook,
             power_notify,
         })
@@ -231,7 +231,7 @@ impl Drop for Window {
         fn inner(window: &mut Window) -> Result<()> {
             unsafe {
                 PostMessageW(
-                    window.window,
+                    window.handle,
                     WM_CLOSE,
                     WPARAM::default(),
                     LPARAM::default(),
@@ -248,7 +248,7 @@ impl Drop for Window {
     }
 }
 
-fn send_event(event_tx: EventTx, event: Event) {
+fn send_event(event_tx: &EventTx, event: Event) {
     trace!("received event: {event:?}");
     if let Err(e) = event_tx.send(event) {
         error!("failed to send event {event:?}: {e}");
@@ -293,6 +293,14 @@ extern "system" fn handle_window_event(
     let ok = || LRESULT(0);
     let Hook { event_tx } = get_hook!(defer);
 
+    let message_params = match u32::try_from(wparam.0) {
+        Ok(x) => x,
+        Err(e) => {
+            error!("failed to convert window message params: {e}");
+            return defer();
+        }
+    };
+
     match message {
         WM_CLOSE => {
             trace!("got WM_CLOSE");
@@ -304,15 +312,15 @@ extern "system" fn handle_window_event(
             unsafe { PostQuitMessage(0) };
             return ok();
         }
-        WM_POWERBROADCAST => match wparam.0 as u32 {
-            PBT_APMRESUMEAUTOMATIC => send_event(event_tx, Event::Resume),
-            PBT_APMSUSPEND => send_event(event_tx, Event::Suspend),
+        WM_POWERBROADCAST => match message_params {
+            PBT_APMRESUMEAUTOMATIC => send_event(&event_tx, Event::Resume),
+            PBT_APMSUSPEND => send_event(&event_tx, Event::Suspend),
             PBT_POWERSETTINGCHANGE => {
                 if let Ok(x) = PowerSettings::try_from(lparam)
                     && x.PowerSetting == GUID_CONSOLE_DISPLAY_STATE
                     && x.Data[0] == DISPLAY_OFF
                 {
-                    send_event(event_tx, Event::Suspend)
+                    send_event(&event_tx, Event::Suspend);
                 }
             }
             _ => {}
@@ -339,13 +347,14 @@ fn key_to_event(key_code: VIRTUAL_KEY, key_state: KeyState) -> Option<Event> {
 }
 
 extern "system" fn handle_key_event(ncode: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    #[allow(clippy::cast_possible_wrap)]
+    const HC_ACTION_I32: i32 = HC_ACTION as i32;
+
     let defer = || unsafe { CallNextHookEx(None, ncode, wparam, lparam) };
     let suppress = || LRESULT(1);
 
-    trace!("ncode: {ncode}, wparam: {wparam:?}, lparam: {lparam:?}");
-
     // Bail if this isn't a keyboard event.
-    if ncode < 0 || ncode != HC_ACTION as i32 {
+    if ncode < 0 || ncode != HC_ACTION_I32 {
         return defer();
     }
 
@@ -358,21 +367,33 @@ extern "system" fn handle_key_event(ncode: i32, wparam: WPARAM, lparam: LPARAM) 
         }
     };
 
-    let key_code = VIRTUAL_KEY(key_event.vkCode as _);
-    let key_state = KeyState(wparam.0 as u32);
+    let key_code = match u16::try_from(key_event.vkCode) {
+        Ok(x) => VIRTUAL_KEY(x),
+        Err(e) => {
+            error!("failed to convert key code: {e}");
+            return defer();
+        }
+    };
 
-    let event = match key_to_event(key_code, key_state) {
-        Some(x) => x,
-        None => return defer(),
+    let key_state = match u32::try_from(wparam.0) {
+        Ok(x) => KeyState(x),
+        Err(e) => {
+            error!("failed to convert key state: {e}");
+            return defer();
+        }
+    };
+
+    let Some(event) = key_to_event(key_code, key_state) else {
+        return defer();
     };
 
     match key_code {
         VK_VOLUME_DOWN | VK_VOLUME_UP | VK_VOLUME_MUTE => {
-            send_event(event_tx, event);
+            send_event(&event_tx, event);
             suppress()
         }
         _ => {
-            send_event(event_tx, event);
+            send_event(&event_tx, event);
             defer()
         }
     }

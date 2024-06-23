@@ -11,7 +11,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, trace, warn};
 
 use crate::{
-    job::{SendJob, SpawnResult},
+    job::{self, SpawnResult},
     os::{Event, Key},
     Spawn,
 };
@@ -20,14 +20,14 @@ pub type CommandTx = mpsc::Sender<Command>;
 pub type CommandRx = mpsc::Receiver<Command>;
 type LastCmd = HashMap<Command, Instant>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Button {
     VolumeUp,
     VolumeDown,
     VolumeMute,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Command {
     PowerOn,
     PowerOff,
@@ -57,7 +57,7 @@ struct Device {
 struct Cec(cec::Connection);
 
 impl Command {
-    const fn debounce_duration(&self) -> Option<Duration> {
+    const fn debounce_duration(self) -> Option<Duration> {
         match self {
             Command::Press(_) | Command::Release(_) => Some(Duration::from_millis(200)),
             Command::Focus => Some(Duration::from_secs(3)),
@@ -96,7 +96,7 @@ impl Spawn for Job {
     }
 }
 
-impl SendJob<Command> for Job {
+impl job::Send<Command> for Job {
     async fn send(&self, cmd: Command) -> Result<()> {
         Ok(self.cmd_tx.send(cmd).await?)
     }
@@ -110,11 +110,9 @@ fn handle_cmd(cec: &Cec, cmd_rx: &mut CommandRx, last_cmd: &mut LastCmd) {
     {
         debug!("sending command: {cmd:?}");
         let result = match cmd {
-            Command::PowerOn => cec.set_active_source(DeviceKind::PlaybackDevice),
+            Command::PowerOn | Command::Focus => cec.set_active_source(DeviceKind::PlaybackDevice),
             Command::PowerOff => cec.send_standby_devices(LogicalAddress::Tv),
             Command::Press(button) => match button {
-                // Button::VolumeUp => cec.volume_up(false),
-                // Button::VolumeDown => cec.volume_down(true),
                 Button::VolumeUp => cec.send_keypress(
                     LogicalAddress::Audiosystem,
                     UserControlCode::VolumeUp,
@@ -128,11 +126,11 @@ fn handle_cmd(cec: &Cec, cmd_rx: &mut CommandRx, last_cmd: &mut LastCmd) {
                 Button::VolumeMute => cec.audio_toggle_mute(),
             },
             Command::Release(button) => match button {
-                Button::VolumeUp => cec.send_key_release(LogicalAddress::Audiosystem, false),
-                Button::VolumeDown => cec.send_key_release(LogicalAddress::Audiosystem, false),
+                Button::VolumeDown | Button::VolumeUp => {
+                    cec.send_key_release(LogicalAddress::Audiosystem, false)
+                }
                 Button::VolumeMute => Ok(()),
             },
-            Command::Focus => cec.set_active_source(DeviceKind::PlaybackDevice),
         };
 
         if let Err(e) = result {
@@ -150,9 +148,9 @@ fn debounce_cmd(cmd: Command, time_by_cmd: &mut HashMap<Command, Instant>) -> Op
             && delta <= duration
         {
             return None;
-        } else {
-            *last_time = time;
         }
+
+        *last_time = time;
     } else {
         time_by_cmd.insert(cmd, time);
     }
@@ -207,10 +205,12 @@ pub fn on_key_press(keypress: cec::Keypress) {
     trace!("got: {:?}", keypress);
 }
 
+#[allow(clippy::needless_pass_by_value)]
 pub fn on_command_received(command: cec::Cmd) {
     trace!("got: {:?}", command);
 }
 
+#[allow(clippy::needless_pass_by_value)]
 pub fn on_log_level(log: cec::LogMsg) {
     match log.level {
         cec::LogLevel::Error => error!("{}", log.message),

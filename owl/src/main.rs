@@ -1,9 +1,10 @@
 use color_eyre::eyre::{eyre, Result};
-use owl::*;
+use owl::{cec, os, Recv, Send, Spawn};
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
+#[allow(clippy::ignored_unit_patterns)]
 #[tokio::main]
 async fn main() -> Result<()> {
     init_tracing();

@@ -13,11 +13,11 @@ pub trait Spawn {
 }
 
 #[allow(async_fn_in_trait)]
-pub trait RecvJob<T> {
+pub trait Recv<T> {
     async fn recv(&mut self) -> Result<T>;
 }
 
 #[allow(async_fn_in_trait)]
-pub trait SendJob<T> {
+pub trait Send<T> {
     async fn send(&self, value: T) -> Result<()>;
 }

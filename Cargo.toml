@@ -7,3 +7,9 @@ opt-level = 3
 
 [profile.release]
 debug = true
+
+[workspace.lints.clippy]
+pedantic = "warn"
+suspicious = "warn"
+complexity = "warn"
+perf = "warn"

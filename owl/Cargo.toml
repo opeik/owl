@@ -29,3 +29,6 @@ derive_more = { version = "=1.0.0-beta.6", features = ["full"] }
 cfg-if = "1"
 tracing-error = "0.2"
 once_cell = "1.19"
+
+[lints]
+workspace = true

@@ -7,5 +7,5 @@ pub mod cec;
 pub mod job;
 pub mod os;
 pub mod prelude {
-    pub use crate::job::{RecvJob, SendJob, Spawn};
+    pub use crate::job::{Recv, Send, Spawn};
 }

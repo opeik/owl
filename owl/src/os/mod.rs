@@ -3,14 +3,14 @@ use tokio::sync::mpsc;
 pub type EventTx = mpsc::UnboundedSender<Event>;
 pub type EventRx = mpsc::UnboundedReceiver<Event>;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Key {
     VolumeUp,
     VolumeDown,
     VolumeMute,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, derive_more::Display)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Event {
     Suspend,
     Resume,
