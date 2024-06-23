@@ -16,11 +16,11 @@ homepage = "https://github.com/ssalonen/cec-rs"
 repository = "https://github.com/ssalonen/cec-rs"
 
 [dependencies]
-arrayvec = "0.7.4"
+arrayvec = "0.7"
 log = "0.4"
-derive_builder = "0.20.0"
-num-traits = "0.2.18"
-thiserror = "1.0"
+derive_builder = "0.20"
+num-traits = "0.2"
+thiserror = "1"
 derive_more = { version = "=1.0.0-beta.6", features = ["full"] }
 enum-repr = "0.2"
 cec_sys = { path = "../cec_sys" }
