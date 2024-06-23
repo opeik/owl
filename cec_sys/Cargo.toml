@@ -1,0 +1,37 @@
+[package]
+name = "cec_sys"
+version = "4.0.3"
+authors = ["Sami Salonen"]
+edition = "2021"
+license = "GPL-2.0"
+description = "FFI bindings to libcec"
+documentation = "https://docs.rs/libcec-sys"
+readme = "README.md"
+include = [
+    "/README.md",
+    "/LICENSE",
+    "/Cargo.toml",
+    "/src/*.rs",
+    "/vendor",
+    "/build/smoke_abi*.c",
+    "/build/build.rs",
+]
+keywords = ["libcec", "cec", "hdmi"]
+categories = ["external-ffi-bindings"]
+homepage = "https://github.com/ssalonen/libcec-sys"
+repository = "https://github.com/ssalonen/libcec-sys"
+links = "cec"
+
+[dependencies]
+cfg-if = "1"
+
+[build-dependencies]
+anyhow = "1"
+bindgen = "0.69"
+cfg-if = "1"
+reqwest = { version = "0.12", features = ["blocking"] }
+zip-extract = "0.1"
+bcmp = "0.4"
+
+[badges.maintenance]
+status = "passively-maintained"

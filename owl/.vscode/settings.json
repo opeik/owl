@@ -2,25 +2,21 @@
     "cSpell.words": [
         "APMRESUMEAUTOMATIC",
         "APMSUSPEND",
-        "arrayvec",
         "HHOOK",
         "HMODULE",
         "HPOWERNOTIFY",
         "HREDRAW",
         "HWND",
         "KBDLLHOOKSTRUCT",
-        "KEYUP",
         "libcec",
-        "lparam",
+        "LPARAM",
         "lpfn",
         "lpsz",
         "LRESULT",
         "ncode",
         "PCWSTR",
         "VREDRAW",
-        "WM_KEYUP",
         "WNDCLASSW",
-        "wparam"
-    ],
-    "vim.useCtrlKeys": false
+        "WPARAM"
+    ]
 }

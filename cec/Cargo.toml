@@ -1,0 +1,30 @@
+[package]
+name = "cec"
+# Do note msrv setting in clippy.toml as well
+rust-version = "1.56.1"
+version = "7.1.2-alpha.0"
+authors = ["Sami Salonen"]
+edition = "2021"
+license = "GPL-2.0"
+description = "Thin but safe wrapper for libcec"
+documentation = "https://docs.rs/cec-rs"
+readme = "README.md"
+include = ["/README.md", "/LICENSE", "/Cargo.toml", "/src/*.rs", "build.rs"]
+keywords = ["libcec", "cec", "hdmi"]
+categories = ["api-bindings"]
+homepage = "https://github.com/ssalonen/cec-rs"
+repository = "https://github.com/ssalonen/cec-rs"
+
+[dependencies]
+arrayvec = "0.7.4"
+log = "0.4"
+derive_builder = "0.20.0"
+num-traits = "0.2.18"
+thiserror = "1.0"
+derive_more = { version = "=1.0.0-beta.6", features = ["full"] }
+enum-repr = "0.2"
+cec_sys = { path = "../cec_sys" }
+
+
+[badges.maintenance]
+status = "passively-maintained"
