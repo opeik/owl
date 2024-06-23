@@ -259,7 +259,7 @@ impl TryFrom<LPARAM> for PowerSettings {
     type Error = color_eyre::eyre::Error;
 
     fn try_from(value: LPARAM) -> Result<PowerSettings> {
-        let power_settings = unsafe { transmute::<LPARAM, *const POWERBROADCAST_SETTING>(value) };
+        let power_settings = value.0 as *const POWERBROADCAST_SETTING;
         if !power_settings.is_null() {
             return Err(eyre!("null power settings"));
         }
@@ -272,7 +272,7 @@ impl TryFrom<LPARAM> for KeyEvent {
     type Error = color_eyre::eyre::Error;
 
     fn try_from(value: LPARAM) -> Result<Self, Self::Error> {
-        let event = unsafe { transmute::<LPARAM, *const KBDLLHOOKSTRUCT>(value) };
+        let event = value.0 as *const KBDLLHOOKSTRUCT;
         if event.is_null() {
             return Err(eyre!("null key event"));
         }
