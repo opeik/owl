@@ -4,7 +4,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use cec::{DeviceKind, LogicalAddress};
+use cec::{DeviceKind, LogicalAddress, UserControlCode};
 use color_eyre::eyre::{Context, Result};
 use tokio::sync::mpsc;
 use tokio_util::sync::CancellationToken;
@@ -12,7 +12,7 @@ use tracing::{debug, error, info, trace, warn};
 
 use crate::{
     job::{SendJob, SpawnResult},
-    os::Event,
+    os::{Event, Key},
     Spawn,
 };
 
@@ -21,13 +21,19 @@ pub type CommandRx = mpsc::Receiver<Command>;
 type LastCmd = HashMap<Command, Instant>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
-pub enum Command {
-    PowerOn,
-    PowerOff,
+pub enum Button {
     VolumeUp,
     VolumeDown,
     VolumeMute,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, derive_more::Display)]
+pub enum Command {
+    PowerOn,
+    PowerOff,
     Focus,
+    Press(Button),
+    Release(Button),
 }
 
 pub struct Job {
@@ -53,9 +59,7 @@ struct Cec(cec::Connection);
 impl Command {
     const fn debounce_duration(&self) -> Option<Duration> {
         match self {
-            // In my testing, 180ms was the shortest delay between repeated volume commands
-            // that maintained CEC bus responsiveness.
-            Command::VolumeUp | Command::VolumeDown => Some(Duration::from_millis(180)),
+            Command::Press(_) | Command::Release(_) => Some(Duration::from_millis(200)),
             Command::Focus => Some(Duration::from_secs(3)),
             _ => None,
         }
@@ -104,13 +108,30 @@ fn handle_cmd(cec: &Cec, cmd_rx: &mut CommandRx, last_cmd: &mut LastCmd) {
     if let Ok(cmd) = cmd_rx.try_recv()
         && let Some(cmd) = debounce_cmd(cmd, last_cmd)
     {
-        debug!("sending command: {cmd}");
+        debug!("sending command: {cmd:?}");
         let result = match cmd {
             Command::PowerOn => cec.set_active_source(DeviceKind::PlaybackDevice),
             Command::PowerOff => cec.send_standby_devices(LogicalAddress::Tv),
-            Command::VolumeUp => cec.volume_up(true),
-            Command::VolumeDown => cec.volume_down(true),
-            Command::VolumeMute => cec.audio_toggle_mute(),
+            Command::Press(button) => match button {
+                // Button::VolumeUp => cec.volume_up(false),
+                // Button::VolumeDown => cec.volume_down(true),
+                Button::VolumeUp => cec.send_keypress(
+                    LogicalAddress::Audiosystem,
+                    UserControlCode::VolumeUp,
+                    false,
+                ),
+                Button::VolumeDown => cec.send_keypress(
+                    LogicalAddress::Audiosystem,
+                    UserControlCode::VolumeDown,
+                    false,
+                ),
+                Button::VolumeMute => cec.audio_toggle_mute(),
+            },
+            Command::Release(button) => match button {
+                Button::VolumeUp => cec.send_key_release(LogicalAddress::Audiosystem, false),
+                Button::VolumeDown => cec.send_key_release(LogicalAddress::Audiosystem, false),
+                Button::VolumeMute => Ok(()),
+            },
             Command::Focus => cec.set_active_source(DeviceKind::PlaybackDevice),
         };
 
@@ -160,15 +181,24 @@ impl Cec {
     }
 }
 
+impl From<Key> for Button {
+    fn from(value: Key) -> Self {
+        match value {
+            Key::VolumeUp => Button::VolumeUp,
+            Key::VolumeDown => Button::VolumeDown,
+            Key::VolumeMute => Button::VolumeMute,
+        }
+    }
+}
+
 impl From<Event> for Command {
     fn from(value: Event) -> Self {
         match value {
             Event::Suspend => Command::PowerOff,
             Event::Resume => Command::PowerOn,
-            Event::VolumeUp => Command::VolumeUp,
-            Event::VolumeDown => Command::VolumeDown,
-            Event::VolumeMute => Command::VolumeMute,
             Event::Focus => Command::Focus,
+            Event::Press(key) => Command::Press(key.into()),
+            Event::Release(key) => Command::Release(key.into()),
         }
     }
 }

@@ -24,13 +24,14 @@ use windows::{
                 UnhookWindowsHookEx, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
                 DEVICE_NOTIFY_WINDOW_HANDLE, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG,
                 PBT_APMRESUMEAUTOMATIC, PBT_APMSUSPEND, PBT_POWERSETTINGCHANGE, WH_KEYBOARD_LL,
-                WINDOW_EX_STYLE, WM_CLOSE, WM_DESTROY, WM_KEYDOWN, WM_POWERBROADCAST, WNDCLASSW,
-                WS_DISABLED,
+                WINDOW_EX_STYLE, WM_CLOSE, WM_DESTROY, WM_KEYDOWN, WM_KEYUP, WM_POWERBROADCAST,
+                WNDCLASSW, WS_DISABLED,
             },
         },
     },
 };
 
+use super::Key;
 use crate::{
     job::{RecvJob, SpawnResult},
     os::{Event, EventRx, EventTx},
@@ -68,11 +69,14 @@ struct Window {
     power_notify: HPOWERNOTIFY,
 }
 
-#[derive(derive_more::Deref)]
+#[derive(Debug, derive_more::Deref)]
 struct PowerSettings(pub POWERBROADCAST_SETTING);
 
-#[derive(derive_more::Deref)]
+#[derive(Debug, derive_more::Deref)]
 struct KeyEvent(pub KBDLLHOOKSTRUCT);
+
+#[derive(Debug, derive_more::Deref)]
+struct KeyState(pub u32);
 
 impl Spawn for Job {
     async fn spawn(run_token: CancellationToken) -> SpawnResult<Self> {
@@ -207,7 +211,7 @@ impl Window {
             RegisterPowerSettingNotification(
                 window,
                 &GUID_CONSOLE_DISPLAY_STATE,
-                DEVICE_NOTIFY_WINDOW_HANDLE.0,
+                DEVICE_NOTIFY_WINDOW_HANDLE,
             )
         }?)
     }
@@ -248,10 +252,25 @@ impl Drop for Window {
 }
 
 fn send_event(event_tx: EventTx, event: Event) {
-    trace!("got event: {event}");
+    trace!("received event: {event:?}");
     if let Err(e) = event_tx.send(event) {
-        error!("failed to send event {event}: {e}");
+        error!("failed to send event {event:?}: {e}");
     };
+}
+
+fn key_to_event(key_code: VIRTUAL_KEY, key_state: KeyState) -> Option<Event> {
+    let event = match *key_state {
+        WM_KEYDOWN => Event::Press,
+        WM_KEYUP => Event::Release,
+        _ => return None,
+    };
+
+    match key_code {
+        VK_VOLUME_DOWN => Some(event(Key::VolumeDown)),
+        VK_VOLUME_UP => Some(event(Key::VolumeUp)),
+        VK_VOLUME_MUTE => Some(event(Key::VolumeMute)),
+        _ => Some(Event::Focus),
+    }
 }
 
 impl TryFrom<LPARAM> for PowerSettings {
@@ -332,7 +351,7 @@ extern "system" fn handle_key_event(ncode: i32, wparam: WPARAM, lparam: LPARAM) 
     }
 
     let Hook { event_tx } = get_hook!(defer);
-    let event = match KeyEvent::try_from(lparam) {
+    let key_event = match KeyEvent::try_from(lparam) {
         Ok(x) => x,
         Err(e) => {
             error!("failed to convert key event: {e}");
@@ -340,26 +359,24 @@ extern "system" fn handle_key_event(ncode: i32, wparam: WPARAM, lparam: LPARAM) 
         }
     };
 
-    if wparam.0 as u32 == WM_KEYDOWN {
-        let key = VIRTUAL_KEY(event.vkCode as _);
-        match key {
-            VK_VOLUME_UP => {
-                send_event(event_tx, Event::VolumeUp);
-                return suppress();
-            }
-            VK_VOLUME_DOWN => {
-                send_event(event_tx, Event::VolumeDown);
-                return suppress();
-            }
-            VK_VOLUME_MUTE => {
-                send_event(event_tx, Event::VolumeMute);
-                return suppress();
-            }
-            _ => send_event(event_tx, Event::Focus),
+    let key_code = VIRTUAL_KEY(key_event.vkCode as _);
+    let key_state = KeyState(wparam.0 as u32);
+
+    let event = match key_to_event(key_code, key_state) {
+        Some(x) => x,
+        None => return defer(),
+    };
+
+    match key_code {
+        VK_VOLUME_DOWN | VK_VOLUME_UP | VK_VOLUME_MUTE => {
+            send_event(event_tx, event);
+            suppress()
+        }
+        _ => {
+            send_event(event_tx, event);
+            defer()
         }
     }
-
-    defer()
 }
 
 unsafe impl Send for Window {}
