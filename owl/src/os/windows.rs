@@ -1,4 +1,4 @@
-use std::{mem::transmute, sync::OnceLock, thread};
+use std::{ptr, sync::OnceLock, thread};
 
 use color_eyre::eyre::{eyre, Context, Result};
 use tokio::sync::{mpsc, oneshot};
@@ -52,8 +52,11 @@ macro_rules! get_hook {
     };
 }
 
+// I hate global, mutable state as much as you do, but we have no other options. There doesn't appear
+// to be another way to smuggle a reference to our code from win32 land.
 static HOOK: OnceLock<Hook> = OnceLock::new();
 
+/// Represents a Windows OS job, responsible for sending and receiving Windows events.
 pub struct Job {
     event_rx: EventRx,
 }
@@ -79,6 +82,7 @@ struct KeyEvent(pub KBDLLHOOKSTRUCT);
 struct KeyState(pub u32);
 
 impl Spawn for Job {
+    /// Spawns a new Windows job. The job runs on a thread.
     async fn spawn(run_token: CancellationToken) -> SpawnResult<Self> {
         let (event_tx, event_rx) = mpsc::unbounded_channel::<Event>();
         let (window_tx, window_rx) = oneshot::channel::<Window>();
@@ -87,7 +91,7 @@ impl Spawn for Job {
         let join_handle = thread::spawn(move || {
             debug!("os job started!");
 
-            // Windows will get mad if you try to use resources outside the thread it was created.
+            // Windows will get mad if you try to use resources outside the thread that created it.
             // Fortunately, the `Drop` implementation sidesteps this with message passing. So,
             // create the window in the job thread then send it back to async land.
             let window = Window::new(event_tx.clone())?;
@@ -123,6 +127,7 @@ impl Recv<Event> for Job {
 
 fn event_loop() {
     let mut message = MSG::default();
+    // TODO: there's _got_ to be a better way to do this
     unsafe {
         while GetMessageW(&mut message, None, 0, 0).into() {
             DispatchMessageW(&message);
@@ -155,7 +160,7 @@ impl Window {
     fn module_handle() -> Result<HMODULE> {
         debug!("getting module handle...");
         let module = unsafe { GetModuleHandleW(None).context("failed to get module handle")? };
-        if (module.0 as *const isize).is_null() {
+        if module.is_invalid() {
             return Err(eyre!("failed to get module handle"));
         }
         Ok(module)
@@ -198,7 +203,7 @@ impl Window {
             )
         };
 
-        if (window.0 as *const isize).is_null() {
+        if ptr::with_exposed_provenance::<usize>(window.0 as usize).is_null() {
             return Err(eyre!("failed to create window"));
         }
 
@@ -259,7 +264,8 @@ impl TryFrom<LPARAM> for PowerSettings {
     type Error = color_eyre::eyre::Error;
 
     fn try_from(value: LPARAM) -> Result<PowerSettings> {
-        let power_settings = value.0 as *const POWERBROADCAST_SETTING;
+        let power_settings =
+            ptr::with_exposed_provenance::<POWERBROADCAST_SETTING>(value.0 as usize);
         if !power_settings.is_null() {
             return Err(eyre!("null power settings"));
         }
@@ -272,7 +278,7 @@ impl TryFrom<LPARAM> for KeyEvent {
     type Error = color_eyre::eyre::Error;
 
     fn try_from(value: LPARAM) -> Result<Self, Self::Error> {
-        let event = value.0 as *const KBDLLHOOKSTRUCT;
+        let event = ptr::with_exposed_provenance::<KBDLLHOOKSTRUCT>(value.0 as usize);
         if event.is_null() {
             return Err(eyre!("null key event"));
         }
@@ -387,15 +393,14 @@ extern "system" fn handle_key_event(ncode: i32, wparam: WPARAM, lparam: LPARAM) 
         return defer();
     };
 
+    send_event(&event_tx, event);
+
+    // Unless volume events are suppressed, they'll operate as normal. This isn't desirable since
+    // we're trying to replace software mixing with hardware mixing. The software mixer works
+    // by reducing audio bit-depth to make the audio quieter, at the expense of audio quality.
     match key_code {
-        VK_VOLUME_DOWN | VK_VOLUME_UP | VK_VOLUME_MUTE => {
-            send_event(&event_tx, event);
-            suppress()
-        }
-        _ => {
-            send_event(&event_tx, event);
-            defer()
-        }
+        VK_VOLUME_DOWN | VK_VOLUME_UP | VK_VOLUME_MUTE => suppress(),
+        _ => defer(),
     }
 }
 

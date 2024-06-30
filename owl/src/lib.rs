@@ -1,5 +1,9 @@
-#![feature(type_alias_impl_trait)]
-#![feature(let_chains)]
+#![feature(
+    type_alias_impl_trait,
+    let_chains,
+    exposed_provenance,
+    strict_provenance
+)]
 
 pub use prelude::*;
 

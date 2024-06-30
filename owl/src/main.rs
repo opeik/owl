@@ -11,8 +11,8 @@ async fn main() -> Result<()> {
 
     info!("starting owl...");
     let run_token = CancellationToken::new();
-    let (cec_thread, cec) = cec::Job::spawn(run_token.clone()).await?;
-    let (os_thread, mut os) = os::Job::spawn(run_token.clone()).await?;
+    let (cec_handle, cec) = cec::Job::spawn(run_token.clone()).await?;
+    let (os_handle, mut os) = os::Job::spawn(run_token.clone()).await?;
 
     let owl_task = tokio::spawn(async move {
         while let Ok(event) = os.recv().await {
@@ -29,8 +29,8 @@ async fn main() -> Result<()> {
     }
 
     info!("stopping owl...");
-    for thread in [cec_thread, os_thread] {
-        thread
+    for handle in [cec_handle, os_handle] {
+        handle
             .join()
             .map_err(|e| eyre!("failed to join thread: {e:?}"))??;
     }
@@ -42,7 +42,6 @@ fn init_tracing() {
     use tracing_error::ErrorLayer;
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-    // let fmt_layer = fmt::layer().without_time();
     let fmt_layer = fmt::layer();
     let filter_layer = EnvFilter::try_from_default_env()
         .or_else(|_| EnvFilter::try_new("owl=trace"))

@@ -20,6 +20,10 @@ pub type CommandTx = mpsc::Sender<Command>;
 pub type CommandRx = mpsc::Receiver<Command>;
 type LastCmd = HashMap<Command, Instant>;
 
+/// Represents a HDMI-CEC remote control button.
+///
+/// See: HDMI-CEC 1.3 Supplement 1, page 47.
+/// https://engineering.purdue.edu/ece477/Archive/2012/Spring/S12-Grp10/Datasheets/CEC_HDMI_Specification.pdf
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Button {
     VolumeUp,
@@ -27,6 +31,10 @@ pub enum Button {
     VolumeMute,
 }
 
+/// Represents a HDMI-CEC command.
+///
+/// See: HDMI-CEC 1.3 Supplement 1, page 65.
+/// https://engineering.purdue.edu/ece477/Archive/2012/Spring/S12-Grp10/Datasheets/CEC_HDMI_Specification.pdf
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Command {
     PowerOn,
@@ -36,21 +44,10 @@ pub enum Command {
     Release(Button),
 }
 
+/// Represents a HDMI-CEC job, responsible for communicating with the HDMI-CEC bus.
+/// libcec only works on a single thread, so we can't use an async task.
 pub struct Job {
     cmd_tx: CommandTx,
-}
-
-#[allow(dead_code)]
-#[derive(Debug)]
-struct Device {
-    vendor: String,
-    name: String,
-    addr: String,
-    logical_addr: i32,
-    physical_addr: u16,
-    cec_version: cec::Version,
-    power_status: cec::PowerStatus,
-    is_active: bool,
 }
 
 #[derive(Debug, derive_more::Deref)]
@@ -67,6 +64,7 @@ impl Command {
 }
 
 impl Spawn for Job {
+    /// Spawns a new HDMI-CEC job. The job runs on a thread.
     async fn spawn(run_token: CancellationToken) -> SpawnResult<Self> {
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(8);
 
@@ -201,23 +199,24 @@ impl From<Event> for Command {
     }
 }
 
-pub fn on_key_press(keypress: cec::Keypress) {
+fn on_key_press(keypress: cec::Keypress) {
     trace!("got: {:?}", keypress);
 }
 
 #[allow(clippy::needless_pass_by_value)]
-pub fn on_command_received(command: cec::Cmd) {
+fn on_command_received(command: cec::Cmd) {
     trace!("got: {:?}", command);
 }
 
 #[allow(clippy::needless_pass_by_value)]
-pub fn on_log_level(log: cec::LogMsg) {
+fn on_log_level(log: cec::LogMsg) {
+    const TARGET: &str = "owl::cec::bus";
     match log.level {
-        cec::LogLevel::Error => error!("{}", log.message),
-        cec::LogLevel::Warning => warn!("{}", log.message),
-        cec::LogLevel::Notice => trace!("{}", log.message),
-        cec::LogLevel::Traffic => trace!("{}", log.message),
-        cec::LogLevel::Debug => debug!("{}", log.message),
-        cec::LogLevel::All => trace!("{}", log.message),
+        cec::LogLevel::Error => error!(target: TARGET, "{}", log.message),
+        cec::LogLevel::Warning => warn!(target: TARGET, "{}", log.message),
+        cec::LogLevel::Notice => trace!(target: TARGET, "{}", log.message),
+        cec::LogLevel::Traffic => trace!(target: TARGET, "{}", log.message),
+        cec::LogLevel::Debug => debug!(target: TARGET, "{}", log.message),
+        cec::LogLevel::All => trace!(target: TARGET, "{}", log.message),
     }
 }
