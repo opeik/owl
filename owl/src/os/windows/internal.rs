@@ -41,10 +41,6 @@ macro_rules! get_owl_handle {
 // to be another way to smuggle a reference to our code from win32 land.
 static OWL_HANDLE: OnceLock<OwlHandle> = OnceLock::new();
 
-struct OwlHandle {
-    pub event_tx: owl::EventTx,
-}
-
 #[derive(Debug)]
 pub struct Window {
     pub(crate) handle: api::HWND,
@@ -52,17 +48,28 @@ pub struct Window {
     pub(crate) power_notify: api::HPOWERNOTIFY,
 }
 
-#[derive(Debug, Clone, Copy, derive_more::Deref)]
-struct PowerSettings(pub api::POWERBROADCAST_SETTING);
+struct OwlHandle {
+    pub event_tx: owl::EventTx,
+}
 
 #[derive(Debug, Clone, Copy, derive_more::Deref)]
-struct KeyEvent(pub api::KBDLLHOOKSTRUCT);
+struct PowerSettings(pub api::POWERBROADCAST_SETTING);
 
 #[derive(Debug, Clone, Copy, derive_more::Deref)]
 struct KeyState(pub u32);
 
 #[derive(Debug, Clone, Copy, derive_more::Deref)]
 struct KeyCode(pub api::VIRTUAL_KEY);
+
+#[derive(Debug, Clone, Copy, derive_more::Deref)]
+struct KeyEventInner(pub api::KBDLLHOOKSTRUCT);
+
+#[derive(Debug, Clone, Copy)]
+struct KeyEvent {
+    pub event: KeyEventInner,
+    pub state: KeyState,
+    pub code: KeyCode,
+}
 
 pub fn event_loop() {
     // TODO: there's _got_ to be a better way to do this
@@ -212,34 +219,70 @@ impl Drop for Window {
 
 unsafe impl Send for Window {}
 
+impl TryFrom<(api::WPARAM, api::LPARAM)> for KeyEvent {
+    type Error = color_eyre::eyre::Error;
+
+    fn try_from(value: (api::WPARAM, api::LPARAM)) -> Result<Self> {
+        let wparam = value.0;
+        let lparam = value.1;
+
+        let key_event = KeyEventInner::try_from(lparam)?;
+        let key_state = KeyState::try_from(wparam)?;
+        let key_code = key_event.key_code()?;
+
+        Ok(Self {
+            event: key_event,
+            state: key_state,
+            code: key_code,
+        })
+    }
+}
+
 impl KeyEvent {
+    fn to_owl_event(self) -> Option<owl::Event> {
+        let to_event = match *self.state {
+            api::WindowsAndMessaging::WM_KEYDOWN => owl::Event::Press,
+            api::WindowsAndMessaging::WM_KEYUP => owl::Event::Release,
+            _ => return None,
+        };
+
+        let result = match *self.code {
+            api::KeyboardAndMouse::VK_VOLUME_DOWN => to_event(owl::Key::VolumeDown),
+            api::KeyboardAndMouse::VK_VOLUME_UP => to_event(owl::Key::VolumeUp),
+            api::KeyboardAndMouse::VK_VOLUME_MUTE => to_event(owl::Key::VolumeMute),
+            _ => owl::Event::Focus,
+        };
+
+        Some(result)
+    }
+}
+
+impl KeyEventInner {
     fn key_code(&self) -> Result<KeyCode> {
         let inner =
             api::VIRTUAL_KEY(u16::try_from(self.vkCode).context("failed to convert key code")?);
         Ok(KeyCode(inner))
     }
-
-    // fn to_owl_event(self) -> owl::Event {}
 }
 
-impl TryFrom<api::LPARAM> for KeyEvent {
+impl TryFrom<api::LPARAM> for KeyEventInner {
     type Error = color_eyre::eyre::Error;
 
-    fn try_from(value: api::LPARAM) -> Result<Self, Self::Error> {
+    fn try_from(value: api::LPARAM) -> Result<Self> {
         #[allow(clippy::cast_sign_loss)]
         let event = ptr::with_exposed_provenance::<api::KBDLLHOOKSTRUCT>(value.0 as usize);
         if event.is_null() {
             return Err(eyre!("null key event"));
         }
 
-        Ok(KeyEvent(unsafe { *event }))
+        Ok(KeyEventInner(unsafe { *event }))
     }
 }
 
 impl TryFrom<api::WPARAM> for KeyState {
     type Error = color_eyre::eyre::Error;
 
-    fn try_from(value: api::WPARAM) -> Result<Self, Self::Error> {
+    fn try_from(value: api::WPARAM) -> Result<Self> {
         match u32::try_from(value.0) {
             Ok(x) => Ok(KeyState(x)),
             Err(e) => Err(eyre!("failed to convert key state: {e}")),
@@ -263,25 +306,10 @@ impl TryFrom<api::LPARAM> for PowerSettings {
     }
 }
 
-fn key_to_event(key_code: KeyCode, key_state: KeyState) -> Option<owl::Event> {
-    let event = match *key_state {
-        api::WindowsAndMessaging::WM_KEYDOWN => owl::Event::Press,
-        api::WindowsAndMessaging::WM_KEYUP => owl::Event::Release,
-        _ => return None,
-    };
-
-    match *key_code {
-        api::KeyboardAndMouse::VK_VOLUME_DOWN => Some(event(owl::Key::VolumeDown)),
-        api::KeyboardAndMouse::VK_VOLUME_UP => Some(event(owl::Key::VolumeUp)),
-        api::KeyboardAndMouse::VK_VOLUME_MUTE => Some(event(owl::Key::VolumeMute)),
-        _ => Some(owl::Event::Focus),
-    }
-}
-
 fn send_event(event_tx: &owl::EventTx, event: owl::Event) {
-    trace!("relaying event: `{event:?}`");
+    trace!("relaying event: {event:?}");
     if let Err(e) = event_tx.send(event) {
-        error!("failed to relay event `{event:?}`: {e}");
+        error!("failed to relay event: {event:?}: {e}");
     };
 }
 
@@ -361,13 +389,6 @@ extern "system" fn handle_window_event(
     defer()
 }
 
-fn convert_key_event(wparam: api::WPARAM, lparam: api::LPARAM) -> Result<(KeyCode, KeyState)> {
-    let key_event = KeyEvent::try_from(lparam)?;
-    let key_code = key_event.key_code()?;
-    let key_state = KeyState::try_from(wparam)?;
-    Ok((key_code, key_state))
-}
-
 extern "system" fn handle_key_event(
     ncode: i32,
     wparam: api::WPARAM,
@@ -387,16 +408,16 @@ extern "system" fn handle_key_event(
     }
 
     let OwlHandle { event_tx } = get_owl_handle!(defer);
-    match convert_key_event(wparam, lparam) {
-        Ok((key_code, key_state)) => match key_to_event(key_code, key_state) {
-            // We got a key event we're interested in!
-            Some(event) => {
-                send_event(&event_tx, event);
+    match KeyEvent::try_from((wparam, lparam)) {
+        Ok(key_event) => match key_event.to_owl_event() {
+            // We got an event we care about!
+            Some(owl_event) => {
+                send_event(&event_tx, owl_event);
 
                 // Unless volume events are suppressed, they'll operate as normal. This isn't desirable since
                 // we're trying to replace software mixing with hardware mixing. The software mixer works
                 // by reducing audio bit-depth to make the audio quieter, at the expense of audio quality.
-                match *key_code {
+                match *key_event.code {
                     api::KeyboardAndMouse::VK_VOLUME_DOWN
                     | api::KeyboardAndMouse::VK_VOLUME_UP
                     | api::KeyboardAndMouse::VK_VOLUME_MUTE => suppress(),
