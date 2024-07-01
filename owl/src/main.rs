@@ -37,6 +37,7 @@ async fn main() -> Result<()> {
             .map_err(|e| eyre!("failed to join thread: {e:?}"))??;
     }
 
+    info!("owl stopped!");
     Ok(())
 }
 

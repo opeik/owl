@@ -268,9 +268,9 @@ impl Drop for Window {
 }
 
 fn send_event(event_tx: &EventTx, event: Event) {
-    trace!("received event: {event:?}");
+    trace!("relaying event: `{event:?}`");
     if let Err(e) = event_tx.send(event) {
-        error!("failed to send event: {event:?}: {e}");
+        error!("failed to relay event `{event:?}`: {e}");
     };
 }
 
@@ -325,14 +325,14 @@ extern "system" fn handle_window_event(
         // The window should terminate.
         // See: https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-close
         WindowsAndMessaging::WM_CLOSE => {
-            trace!("got `WM_CLOSE` event, destroying window...");
+            trace!("received `WM_CLOSE` event, destroying window...");
             unsafe { DestroyWindow(window).expect("failed to destroy window") };
             return ok();
         }
         // The window is being destroyed.
         // See: https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-destroy
         WindowsAndMessaging::WM_DESTROY => {
-            trace!("got `WM_DESTROY` event, stopping event loop...");
+            trace!("received `WM_DESTROY` event, stopping event loop...");
             unsafe { PostQuitMessage(0) };
             return ok();
         }

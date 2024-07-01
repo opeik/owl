@@ -205,12 +205,12 @@ impl From<Event> for Command {
 }
 
 fn on_key_press(keypress: cec::Keypress) {
-    trace!("got: {:?}", keypress);
+    trace!(target: "libcec", "key pressed: {:?}", keypress);
 }
 
 #[allow(clippy::needless_pass_by_value)]
 fn on_command_received(command: cec::Cmd) {
-    trace!("got: {:?}", command);
+    trace!(target: "libcec", "command received: {:?}", command);
 }
 
 #[allow(clippy::needless_pass_by_value)]
