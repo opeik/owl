@@ -13,6 +13,7 @@ async fn main() -> Result<()> {
     let run_token = CancellationToken::new();
     let (cec_handle, cec) = cec::Job::spawn(run_token.clone()).await?;
     let (os_handle, mut os) = os::Job::spawn(run_token.clone()).await?;
+    let handles = [cec_handle, os_handle];
 
     let owl_task = tokio::spawn(async move {
         while let Ok(event) = os.recv().await {
@@ -22,6 +23,7 @@ async fn main() -> Result<()> {
         }
     });
 
+    info!("owl ready!");
     tokio::select! {
         _ = signal::ctrl_c() => run_token.cancel(),
         _ = owl_task => error!("owl stopped unexpectedly?!"),
@@ -29,7 +31,7 @@ async fn main() -> Result<()> {
     }
 
     info!("stopping owl...");
-    for handle in [cec_handle, os_handle] {
+    for handle in handles {
         handle
             .join()
             .map_err(|e| eyre!("failed to join thread: {e:?}"))??;

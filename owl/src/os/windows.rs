@@ -14,18 +14,15 @@ use windows::{
                 RegisterPowerSettingNotification, UnregisterPowerSettingNotification, HPOWERNOTIFY,
                 POWERBROADCAST_SETTING,
             },
-            SystemServices::GUID_CONSOLE_DISPLAY_STATE,
+            SystemServices,
         },
         UI::{
-            Input::KeyboardAndMouse::{VIRTUAL_KEY, VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP},
+            Input::KeyboardAndMouse::{self, VIRTUAL_KEY},
             WindowsAndMessaging::{
-                CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow, DispatchMessageW,
-                GetMessageW, PostMessageW, PostQuitMessage, RegisterClassW, SetWindowsHookExW,
-                UnhookWindowsHookEx, CS_HREDRAW, CS_VREDRAW, CW_USEDEFAULT,
-                DEVICE_NOTIFY_WINDOW_HANDLE, HC_ACTION, HHOOK, KBDLLHOOKSTRUCT, MSG,
-                PBT_APMRESUMEAUTOMATIC, PBT_APMSUSPEND, PBT_POWERSETTINGCHANGE, WH_KEYBOARD_LL,
-                WINDOW_EX_STYLE, WM_CLOSE, WM_DESTROY, WM_KEYDOWN, WM_KEYUP, WM_POWERBROADCAST,
-                WNDCLASSW, WS_DISABLED,
+                self, CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow,
+                DispatchMessageW, GetMessageW, PostMessageW, PostQuitMessage, RegisterClassW,
+                SetWindowsHookExW, UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT, WINDOW_EX_STYLE,
+                WNDCLASSW,
             },
         },
     },
@@ -33,7 +30,7 @@ use windows::{
 
 use super::Key;
 use crate::{
-    job::{Recv, SpawnResult},
+    job::{self, Recv, SpawnResult},
     os::{Event, EventRx, EventTx},
     Spawn,
 };
@@ -86,27 +83,39 @@ impl Spawn for Job {
     async fn spawn(run_token: CancellationToken) -> SpawnResult<Self> {
         let (event_tx, event_rx) = mpsc::unbounded_channel::<Event>();
         let (window_tx, window_rx) = oneshot::channel::<Window>();
+        let (ready_tx, ready_rx) = oneshot::channel::<Result<()>>();
 
-        debug!("spawning os job...");
+        trace!("spawning os job...");
         let join_handle = thread::spawn(move || {
-            debug!("os job started!");
+            debug!("os job starting...");
 
             // Windows will get mad if you try to use resources outside the thread that created it.
             // Fortunately, the `Drop` implementation sidesteps this with message passing. So,
             // create the window in the job thread then send it back to async land.
-            let window = Window::new(event_tx.clone())?;
-            window_tx
-                .send(window)
-                .map_err(|_| eyre!("failed to send window"))?;
-            debug!("os job ready!");
+            job::send_ready_status(ready_tx, || match Window::new(event_tx.clone()) {
+                Ok(x) => {
+                    trace!("sending window handle to task...");
+                    window_tx
+                        .send(x)
+                        .map_err(|_| eyre!("failed to send window handle to task"))
+                }
+                Err(e) => Err(e),
+            })?;
 
             event_loop();
-
             Result::Ok(())
         });
 
-        // Dropping the `Window` will stop the event loop, saving us having to poll.
         let window = window_rx.await?;
+        trace!("received window handle from thread!");
+
+        ready_rx
+            .await
+            .context("failed to read job status")?
+            .context("job failed to start")?;
+        debug!("os job ready!");
+
+        // Dropping the `Window` will stop the event loop, saving us having to poll.
         let _watchdog = tokio::spawn(async move {
             run_token.cancelled().await;
             drop(window);
@@ -126,7 +135,7 @@ impl Recv<Event> for Job {
 }
 
 fn event_loop() {
-    let mut message = MSG::default();
+    let mut message = WindowsAndMessaging::MSG::default();
     // TODO: there's _got_ to be a better way to do this
     unsafe {
         while GetMessageW(&mut message, None, 0, 0).into() {
@@ -142,13 +151,13 @@ impl Window {
         HOOK.set(Hook { event_tx })
             .map_err(|_| eyre!("failed to set hook"))?;
 
-        debug!("creating window...");
+        trace!("creating window...");
         let module = Self::module_handle()?;
         let _window_class = Self::new_window_class(module)?;
         let window = Self::new_window(module)?;
         let key_hook = Self::new_key_hook(module)?;
         let power_notify = Self::new_power_notify(window)?;
-        debug!("window created!");
+        trace!("window created!");
 
         Ok(Self {
             handle: window,
@@ -158,7 +167,7 @@ impl Window {
     }
 
     fn module_handle() -> Result<HMODULE> {
-        debug!("getting module handle...");
+        trace!("getting module handle...");
         let module = unsafe { GetModuleHandleW(None).context("failed to get module handle")? };
         if module.is_invalid() {
             return Err(eyre!("failed to get module handle"));
@@ -167,10 +176,10 @@ impl Window {
     }
 
     fn new_window_class(module: HMODULE) -> Result<WNDCLASSW> {
-        debug!("registering window class...");
+        trace!("registering window class...");
         let window_class = WNDCLASSW {
             hInstance: module.into(),
-            style: CS_HREDRAW | CS_VREDRAW,
+            style: WindowsAndMessaging::CS_HREDRAW | WindowsAndMessaging::CS_VREDRAW,
             lpszClassName: Self::WINDOW_CLASS,
             lpfnWndProc: Some(handle_window_event),
             ..Default::default()
@@ -185,17 +194,17 @@ impl Window {
     }
 
     fn new_window(module: HMODULE) -> Result<HWND> {
-        debug!("creating window...");
+        trace!("creating window...");
         let window = unsafe {
             CreateWindowExW(
                 WINDOW_EX_STYLE::default(),
                 Self::WINDOW_CLASS,
                 w!("owl"),
-                WS_DISABLED,
-                CW_USEDEFAULT,
-                CW_USEDEFAULT,
-                CW_USEDEFAULT,
-                CW_USEDEFAULT,
+                WindowsAndMessaging::WS_DISABLED,
+                WindowsAndMessaging::CW_USEDEFAULT,
+                WindowsAndMessaging::CW_USEDEFAULT,
+                WindowsAndMessaging::CW_USEDEFAULT,
+                WindowsAndMessaging::CW_USEDEFAULT,
                 None,
                 None,
                 module,
@@ -211,22 +220,27 @@ impl Window {
     }
 
     fn new_power_notify(window: HWND) -> Result<HPOWERNOTIFY> {
-        debug!("registering for power notifications...");
+        trace!("registering for power notifications...");
         unsafe {
             RegisterPowerSettingNotification(
                 window,
-                &GUID_CONSOLE_DISPLAY_STATE,
-                DEVICE_NOTIFY_WINDOW_HANDLE,
+                &SystemServices::GUID_CONSOLE_DISPLAY_STATE,
+                WindowsAndMessaging::DEVICE_NOTIFY_WINDOW_HANDLE,
             )
             .context("failed to register power notifications")
         }
     }
 
     fn new_key_hook(module: HMODULE) -> Result<HHOOK> {
-        debug!("registering key event hook...");
+        trace!("registering key event hook...");
         unsafe {
-            SetWindowsHookExW(WH_KEYBOARD_LL, Some(handle_key_event), module, 0)
-                .context("failed to register keyboard hook")
+            SetWindowsHookExW(
+                WindowsAndMessaging::WH_KEYBOARD_LL,
+                Some(handle_key_event),
+                module,
+                0,
+            )
+            .context("failed to register keyboard hook")
         }
     }
 }
@@ -237,7 +251,7 @@ impl Drop for Window {
             unsafe {
                 PostMessageW(
                     window.handle,
-                    WM_CLOSE,
+                    WindowsAndMessaging::WM_CLOSE,
                     WPARAM::default(),
                     LPARAM::default(),
                 )?;
@@ -256,7 +270,7 @@ impl Drop for Window {
 fn send_event(event_tx: &EventTx, event: Event) {
     trace!("received event: {event:?}");
     if let Err(e) = event_tx.send(event) {
-        error!("failed to send event {event:?}: {e}");
+        error!("failed to send event: {event:?}: {e}");
     };
 }
 
@@ -308,23 +322,42 @@ extern "system" fn handle_window_event(
     };
 
     match message {
-        WM_CLOSE => {
-            trace!("got WM_CLOSE");
+        // The window should terminate.
+        // See: https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-close
+        WindowsAndMessaging::WM_CLOSE => {
+            trace!("got `WM_CLOSE` event, destroying window...");
             unsafe { DestroyWindow(window).expect("failed to destroy window") };
             return ok();
         }
-        WM_DESTROY => {
-            trace!("got WM_DESTROY");
+        // The window is being destroyed.
+        // See: https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-destroy
+        WindowsAndMessaging::WM_DESTROY => {
+            trace!("got `WM_DESTROY` event, stopping event loop...");
             unsafe { PostQuitMessage(0) };
             return ok();
         }
-        WM_POWERBROADCAST => match message_params {
-            PBT_APMRESUMEAUTOMATIC => send_event(&event_tx, Event::Resume),
-            PBT_APMSUSPEND => send_event(&event_tx, Event::Suspend),
-            PBT_POWERSETTINGCHANGE => {
-                if let Ok(x) = PowerSettings::try_from(lparam)
-                    && x.PowerSetting == GUID_CONSOLE_DISPLAY_STATE
-                    && x.Data[0] == DISPLAY_OFF
+
+        // A power-management event has occurred.
+        // See: https://learn.microsoft.com/en-us/windows/win32/power/wm-powerbroadcast
+        WindowsAndMessaging::WM_POWERBROADCAST => match message_params {
+            // The system is resuming from sleep.
+            // See: https://learn.microsoft.com/en-us/windows/win32/power/pbt-apmresumeautomatic
+            WindowsAndMessaging::PBT_APMRESUMEAUTOMATIC => send_event(&event_tx, Event::Resume),
+
+            // The system is about to sleep.
+            // See: https://learn.microsoft.com/en-us/windows/win32/power/pbt-apmsuspend
+            WindowsAndMessaging::PBT_APMSUSPEND => send_event(&event_tx, Event::Suspend),
+
+            // Power setting change occurred.
+            // See: https://learn.microsoft.com/en-us/windows/win32/power/pbt-powersettingchange
+            WindowsAndMessaging::PBT_POWERSETTINGCHANGE => {
+                if let Ok(power_settings) = PowerSettings::try_from(lparam)
+                    && let new_power_setting = power_settings.Data[0]
+                    && let event_target = power_settings.PowerSetting
+                    // The current monitor's display state has changed.
+                    // See: https://learn.microsoft.com/en-us/windows/win32/power/power-setting-guids
+                    && event_target == SystemServices::GUID_CONSOLE_DISPLAY_STATE
+                    && new_power_setting == DISPLAY_OFF
                 {
                     send_event(&event_tx, Event::Suspend);
                 }
@@ -339,22 +372,24 @@ extern "system" fn handle_window_event(
 
 fn key_to_event(key_code: VIRTUAL_KEY, key_state: KeyState) -> Option<Event> {
     let event = match *key_state {
-        WM_KEYDOWN => Event::Press,
-        WM_KEYUP => Event::Release,
+        WindowsAndMessaging::WM_KEYDOWN => Event::Press,
+        WindowsAndMessaging::WM_KEYUP => Event::Release,
         _ => return None,
     };
 
     match key_code {
-        VK_VOLUME_DOWN => Some(event(Key::VolumeDown)),
-        VK_VOLUME_UP => Some(event(Key::VolumeUp)),
-        VK_VOLUME_MUTE => Some(event(Key::VolumeMute)),
+        KeyboardAndMouse::VK_VOLUME_DOWN => Some(event(Key::VolumeDown)),
+        KeyboardAndMouse::VK_VOLUME_UP => Some(event(Key::VolumeUp)),
+        KeyboardAndMouse::VK_VOLUME_MUTE => Some(event(Key::VolumeMute)),
         _ => Some(Event::Focus),
     }
 }
 
 extern "system" fn handle_key_event(ncode: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    /// Indicates the event is a keyboard event.
+    /// See: https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc
     #[allow(clippy::cast_possible_wrap)]
-    const HC_ACTION_I32: i32 = HC_ACTION as i32;
+    const HC_ACTION_I32: i32 = WindowsAndMessaging::HC_ACTION as i32;
 
     let defer = || unsafe { CallNextHookEx(None, ncode, wparam, lparam) };
     let suppress = || LRESULT(1);
@@ -399,7 +434,9 @@ extern "system" fn handle_key_event(ncode: i32, wparam: WPARAM, lparam: LPARAM) 
     // we're trying to replace software mixing with hardware mixing. The software mixer works
     // by reducing audio bit-depth to make the audio quieter, at the expense of audio quality.
     match key_code {
-        VK_VOLUME_DOWN | VK_VOLUME_UP | VK_VOLUME_MUTE => suppress(),
+        KeyboardAndMouse::VK_VOLUME_DOWN
+        | KeyboardAndMouse::VK_VOLUME_UP
+        | KeyboardAndMouse::VK_VOLUME_MUTE => suppress(),
         _ => defer(),
     }
 }

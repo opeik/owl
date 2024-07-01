@@ -31,7 +31,6 @@
                     "build",
                     "--bin=owl",
                     "--package=owl",
-                    "--release"
                 ],
                 "filter": {
                     "name": "owl",

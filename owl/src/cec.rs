@@ -6,9 +6,9 @@ use std::{
 
 use cec::{DeviceKind, LogicalAddress, UserControlCode};
 use color_eyre::eyre::{Context, Result};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, trace, warn};
+use tracing::{debug, error, trace, warn};
 
 use crate::{
     job::{self, SpawnResult},
@@ -23,7 +23,7 @@ type LastCmd = HashMap<Command, Instant>;
 /// Represents a HDMI-CEC remote control button.
 ///
 /// See: HDMI-CEC 1.3 Supplement 1, page 47.
-/// https://engineering.purdue.edu/ece477/Archive/2012/Spring/S12-Grp10/Datasheets/CEC_HDMI_Specification.pdf
+/// <https://engineering.purdue.edu/ece477/Archive/2012/Spring/S12-Grp10/Datasheets/CEC_HDMI_Specification.pdf>
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Button {
     VolumeUp,
@@ -34,7 +34,7 @@ pub enum Button {
 /// Represents a HDMI-CEC command.
 ///
 /// See: HDMI-CEC 1.3 Supplement 1, page 65.
-/// https://engineering.purdue.edu/ece477/Archive/2012/Spring/S12-Grp10/Datasheets/CEC_HDMI_Specification.pdf
+/// <https://engineering.purdue.edu/ece477/Archive/2012/Spring/S12-Grp10/Datasheets/CEC_HDMI_Specification.pdf>
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Command {
     PowerOn,
@@ -67,19 +67,19 @@ impl Spawn for Job {
     /// Spawns a new HDMI-CEC job. The job runs on a thread.
     async fn spawn(run_token: CancellationToken) -> SpawnResult<Self> {
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(8);
+        let (ready_tx, ready_rx) = oneshot::channel::<Result<()>>();
 
-        debug!("spawning cec job...");
+        trace!("spawning cec job...");
         let handle = thread::spawn(move || {
-            debug!("cec job started!");
+            debug!("cec job starting...");
 
-            let run_token = run_token;
-            let cec = Cec::new()?;
             let mut last_cmd = LastCmd::new();
-            debug!("cec job ready!");
+            let run_token = run_token;
+            let cec = job::send_ready_status(ready_tx, Cec::new)?;
 
             loop {
                 if run_token.is_cancelled() {
-                    debug!("stopping cec job...");
+                    trace!("stopping cec job...");
                     break;
                 }
 
@@ -89,6 +89,12 @@ impl Spawn for Job {
 
             Ok(())
         });
+
+        ready_rx
+            .await
+            .context("failed to read job status")?
+            .context("job failed to start")?;
+        debug!("cec job ready!");
 
         Ok((handle, Self { cmd_tx }))
     }
@@ -158,8 +164,7 @@ fn debounce_cmd(cmd: Command, time_by_cmd: &mut HashMap<Command, Instant>) -> Op
 
 impl Cec {
     pub fn new() -> Result<Self> {
-        info!("connected to cec...");
-
+        trace!("connecting to cec...");
         let connection = cec::Connection::builder()
             .detect_device(true)
             .name("owl".to_owned())
@@ -172,7 +177,7 @@ impl Cec {
             .connect()
             .context("failed to connect to cec")?;
 
-        info!("connected to cec!");
+        trace!("connected to cec!");
         Ok(Self(connection))
     }
 }
@@ -210,7 +215,7 @@ fn on_command_received(command: cec::Cmd) {
 
 #[allow(clippy::needless_pass_by_value)]
 fn on_log_level(log: cec::LogMsg) {
-    const TARGET: &str = "owl::cec::bus";
+    const TARGET: &str = "libcec";
     match log.level {
         cec::LogLevel::Error => error!(target: TARGET, "{}", log.message),
         cec::LogLevel::Warning => warn!(target: TARGET, "{}", log.message),
