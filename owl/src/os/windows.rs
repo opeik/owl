@@ -4,29 +4,24 @@ use color_eyre::eyre::{eyre, Context, Result};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, trace};
-use windows::{
-    core::{w, PCWSTR},
-    Win32::{
-        Foundation::{HMODULE, HWND, LPARAM, LRESULT, WPARAM},
-        System::{
-            LibraryLoader::GetModuleHandleW,
-            Power::{
-                RegisterPowerSettingNotification, UnregisterPowerSettingNotification, HPOWERNOTIFY,
-                POWERBROADCAST_SETTING,
+
+mod os {
+    pub use windows::{
+        core::{w, PCWSTR},
+        Win32::{
+            Foundation::{HMODULE, HWND, LPARAM, LRESULT, WPARAM},
+            System::{
+                LibraryLoader,
+                Power::{self, HPOWERNOTIFY, POWERBROADCAST_SETTING},
+                SystemServices,
             },
-            SystemServices,
-        },
-        UI::{
-            Input::KeyboardAndMouse::{self, VIRTUAL_KEY},
-            WindowsAndMessaging::{
-                self, CallNextHookEx, CreateWindowExW, DefWindowProcW, DestroyWindow,
-                DispatchMessageW, GetMessageW, PostMessageW, PostQuitMessage, RegisterClassW,
-                SetWindowsHookExW, UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT, WINDOW_EX_STYLE,
-                WNDCLASSW,
+            UI::{
+                Input::KeyboardAndMouse::{self, VIRTUAL_KEY},
+                WindowsAndMessaging::{self, HHOOK, KBDLLHOOKSTRUCT, WINDOW_EX_STYLE, WNDCLASSW},
             },
         },
-    },
-};
+    };
+}
 
 use super::Key;
 use crate::{
@@ -35,14 +30,14 @@ use crate::{
     Spawn,
 };
 
-macro_rules! get_hook {
+macro_rules! get_owl_state {
     ($on_err:expr) => {
-        match HOOK.get() {
-            Some(x) => Hook {
+        match OWL_STATE.get() {
+            Some(x) => OwlState {
                 event_tx: x.event_tx.clone(),
             },
             None => {
-                error!("hook unset");
+                error!("owl state unset");
                 return { $on_err() };
             }
         }
@@ -51,29 +46,29 @@ macro_rules! get_hook {
 
 // I hate global, mutable state as much as you do, but we have no other options. There doesn't appear
 // to be another way to smuggle a reference to our code from win32 land.
-static HOOK: OnceLock<Hook> = OnceLock::new();
+static OWL_STATE: OnceLock<OwlState> = OnceLock::new();
 
 /// Represents a Windows OS job, responsible for sending and receiving Windows events.
 pub struct Job {
     event_rx: EventRx,
 }
 
-struct Hook {
+struct OwlState {
     event_tx: EventTx,
 }
 
 #[derive(Debug)]
 struct Window {
-    handle: HWND,
-    key_hook: HHOOK,
-    power_notify: HPOWERNOTIFY,
+    handle: os::HWND,
+    key_hook: os::HHOOK,
+    power_notify: os::HPOWERNOTIFY,
 }
 
 #[derive(Debug, Clone, Copy, derive_more::Deref)]
-struct PowerSettings(pub POWERBROADCAST_SETTING);
+struct PowerSettings(pub os::POWERBROADCAST_SETTING);
 
 #[derive(Debug, Clone, Copy, derive_more::Deref)]
-struct KeyEvent(pub KBDLLHOOKSTRUCT);
+struct KeyEvent(pub os::KBDLLHOOKSTRUCT);
 
 #[derive(Debug, Clone, Copy, derive_more::Deref)]
 struct KeyState(pub u32);
@@ -135,21 +130,22 @@ impl Recv<Event> for Job {
 }
 
 fn event_loop() {
-    let mut message = WindowsAndMessaging::MSG::default();
     // TODO: there's _got_ to be a better way to do this
+    let mut msg = os::WindowsAndMessaging::MSG::default();
     unsafe {
-        while GetMessageW(&mut message, None, 0, 0).into() {
-            DispatchMessageW(&message);
+        while os::WindowsAndMessaging::GetMessageW(&mut msg, None, 0, 0).into() {
+            os::WindowsAndMessaging::DispatchMessageW(&msg);
         }
     }
 }
 
 impl Window {
-    const WINDOW_CLASS: PCWSTR = w!("window");
+    const WINDOW_CLASS: os::PCWSTR = os::w!("window");
 
     pub fn new(event_tx: EventTx) -> Result<Self> {
-        HOOK.set(Hook { event_tx })
-            .map_err(|_| eyre!("failed to set hook"))?;
+        OWL_STATE
+            .set(OwlState { event_tx })
+            .map_err(|_| eyre!("failed to set owl state"))?;
 
         trace!("creating window...");
         let module = Self::module_handle()?;
@@ -166,26 +162,30 @@ impl Window {
         })
     }
 
-    fn module_handle() -> Result<HMODULE> {
+    fn module_handle() -> Result<os::HMODULE> {
         trace!("getting module handle...");
-        let module = unsafe { GetModuleHandleW(None).context("failed to get module handle")? };
+        let module = unsafe {
+            os::LibraryLoader::GetModuleHandleW(None).context("failed to get module handle")?
+        };
+
         if module.is_invalid() {
             return Err(eyre!("failed to get module handle"));
         }
+
         Ok(module)
     }
 
-    fn new_window_class(module: HMODULE) -> Result<WNDCLASSW> {
+    fn new_window_class(module: os::HMODULE) -> Result<os::WNDCLASSW> {
         trace!("registering window class...");
-        let window_class = WNDCLASSW {
+        let window_class = os::WNDCLASSW {
             hInstance: module.into(),
-            style: WindowsAndMessaging::CS_HREDRAW | WindowsAndMessaging::CS_VREDRAW,
+            style: os::WindowsAndMessaging::CS_HREDRAW | os::WindowsAndMessaging::CS_VREDRAW,
             lpszClassName: Self::WINDOW_CLASS,
             lpfnWndProc: Some(handle_window_event),
             ..Default::default()
         };
 
-        let atom = unsafe { RegisterClassW(&window_class) };
+        let atom = unsafe { os::WindowsAndMessaging::RegisterClassW(&window_class) };
         if atom == 0 {
             return Err(eyre!("failed to register class"));
         }
@@ -193,18 +193,18 @@ impl Window {
         Ok(window_class)
     }
 
-    fn new_window(module: HMODULE) -> Result<HWND> {
+    fn new_window(module: os::HMODULE) -> Result<os::HWND> {
         trace!("creating window...");
         let window = unsafe {
-            CreateWindowExW(
-                WINDOW_EX_STYLE::default(),
+            os::WindowsAndMessaging::CreateWindowExW(
+                os::WINDOW_EX_STYLE::default(),
                 Self::WINDOW_CLASS,
-                w!("owl"),
-                WindowsAndMessaging::WS_DISABLED,
-                WindowsAndMessaging::CW_USEDEFAULT,
-                WindowsAndMessaging::CW_USEDEFAULT,
-                WindowsAndMessaging::CW_USEDEFAULT,
-                WindowsAndMessaging::CW_USEDEFAULT,
+                os::w!("owl"),
+                os::WindowsAndMessaging::WS_DISABLED,
+                os::WindowsAndMessaging::CW_USEDEFAULT,
+                os::WindowsAndMessaging::CW_USEDEFAULT,
+                os::WindowsAndMessaging::CW_USEDEFAULT,
+                os::WindowsAndMessaging::CW_USEDEFAULT,
                 None,
                 None,
                 module,
@@ -212,6 +212,7 @@ impl Window {
             )
         };
 
+        #[allow(clippy::cast_sign_loss)]
         if ptr::with_exposed_provenance::<usize>(window.0 as usize).is_null() {
             return Err(eyre!("failed to create window"));
         }
@@ -219,28 +220,28 @@ impl Window {
         Ok(window)
     }
 
-    fn new_power_notify(window: HWND) -> Result<HPOWERNOTIFY> {
+    fn new_power_notify(window: os::HWND) -> Result<os::HPOWERNOTIFY> {
         trace!("registering for power notifications...");
         unsafe {
-            RegisterPowerSettingNotification(
+            os::Power::RegisterPowerSettingNotification(
                 window,
-                &SystemServices::GUID_CONSOLE_DISPLAY_STATE,
-                WindowsAndMessaging::DEVICE_NOTIFY_WINDOW_HANDLE,
+                &os::SystemServices::GUID_CONSOLE_DISPLAY_STATE,
+                os::WindowsAndMessaging::DEVICE_NOTIFY_WINDOW_HANDLE,
             )
             .context("failed to register power notifications")
         }
     }
 
-    fn new_key_hook(module: HMODULE) -> Result<HHOOK> {
-        trace!("registering key event hook...");
+    fn new_key_hook(module: os::HMODULE) -> Result<os::HHOOK> {
+        trace!("registering key hook...");
         unsafe {
-            SetWindowsHookExW(
-                WindowsAndMessaging::WH_KEYBOARD_LL,
+            os::WindowsAndMessaging::SetWindowsHookExW(
+                os::WindowsAndMessaging::WH_KEYBOARD_LL,
                 Some(handle_key_event),
                 module,
                 0,
             )
-            .context("failed to register keyboard hook")
+            .context("failed to register key hook")
         }
     }
 }
@@ -249,18 +250,24 @@ impl Drop for Window {
     fn drop(&mut self) {
         fn inner(window: &mut Window) -> Result<()> {
             unsafe {
-                PostMessageW(
+                trace!("posting `WM_CLOSE` message...");
+                os::WindowsAndMessaging::PostMessageW(
                     window.handle,
-                    WindowsAndMessaging::WM_CLOSE,
-                    WPARAM::default(),
-                    LPARAM::default(),
+                    os::WindowsAndMessaging::WM_CLOSE,
+                    os::WPARAM::default(),
+                    os::LPARAM::default(),
                 )?;
-                UnregisterPowerSettingNotification(window.power_notify)?;
-                UnhookWindowsHookEx(window.key_hook)?;
+
+                trace!("unregistering power notifications...");
+                os::Power::UnregisterPowerSettingNotification(window.power_notify)?;
+
+                trace!("unregistering key hook...");
+                os::WindowsAndMessaging::UnhookWindowsHookEx(window.key_hook)?;
                 Ok(())
             }
         }
 
+        trace!("dropping window...");
         if let Err(e) = inner(self) {
             error!("failed to drop window: {e}");
         }
@@ -274,12 +281,13 @@ fn send_event(event_tx: &EventTx, event: Event) {
     };
 }
 
-impl TryFrom<LPARAM> for PowerSettings {
+impl TryFrom<os::LPARAM> for PowerSettings {
     type Error = color_eyre::eyre::Error;
 
-    fn try_from(value: LPARAM) -> Result<PowerSettings> {
+    fn try_from(value: os::LPARAM) -> Result<PowerSettings> {
+        #[allow(clippy::cast_sign_loss)]
         let power_settings =
-            ptr::with_exposed_provenance::<POWERBROADCAST_SETTING>(value.0 as usize);
+            ptr::with_exposed_provenance::<os::POWERBROADCAST_SETTING>(value.0 as usize);
         if !power_settings.is_null() {
             return Err(eyre!("null power settings"));
         }
@@ -288,11 +296,12 @@ impl TryFrom<LPARAM> for PowerSettings {
     }
 }
 
-impl TryFrom<LPARAM> for KeyEvent {
+impl TryFrom<os::LPARAM> for KeyEvent {
     type Error = color_eyre::eyre::Error;
 
-    fn try_from(value: LPARAM) -> Result<Self, Self::Error> {
-        let event = ptr::with_exposed_provenance::<KBDLLHOOKSTRUCT>(value.0 as usize);
+    fn try_from(value: os::LPARAM) -> Result<Self, Self::Error> {
+        #[allow(clippy::cast_sign_loss)]
+        let event = ptr::with_exposed_provenance::<os::KBDLLHOOKSTRUCT>(value.0 as usize);
         if event.is_null() {
             return Err(eyre!("null key event"));
         }
@@ -302,16 +311,17 @@ impl TryFrom<LPARAM> for KeyEvent {
 }
 
 extern "system" fn handle_window_event(
-    window: HWND,
+    window: os::HWND,
     message: u32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
+    wparam: os::WPARAM,
+    lparam: os::LPARAM,
+) -> os::LRESULT {
     const DISPLAY_OFF: u8 = 0;
 
-    let defer = || unsafe { DefWindowProcW(window, message, wparam, lparam) };
-    let ok = || LRESULT(0);
-    let Hook { event_tx } = get_hook!(defer);
+    let defer =
+        || unsafe { os::WindowsAndMessaging::DefWindowProcW(window, message, wparam, lparam) };
+    let ok = || os::LRESULT(0);
+    let OwlState { event_tx } = get_owl_state!(defer);
 
     let message_params = match u32::try_from(wparam.0) {
         Ok(x) => x,
@@ -324,39 +334,41 @@ extern "system" fn handle_window_event(
     match message {
         // The window should terminate.
         // See: https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-close
-        WindowsAndMessaging::WM_CLOSE => {
+        os::WindowsAndMessaging::WM_CLOSE => {
             trace!("received `WM_CLOSE` event, destroying window...");
-            unsafe { DestroyWindow(window).expect("failed to destroy window") };
+            unsafe {
+                os::WindowsAndMessaging::DestroyWindow(window).expect("failed to destroy window");
+            };
             return ok();
         }
         // The window is being destroyed.
         // See: https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-destroy
-        WindowsAndMessaging::WM_DESTROY => {
+        os::WindowsAndMessaging::WM_DESTROY => {
             trace!("received `WM_DESTROY` event, stopping event loop...");
-            unsafe { PostQuitMessage(0) };
+            unsafe { os::WindowsAndMessaging::PostQuitMessage(0) };
             return ok();
         }
 
         // A power-management event has occurred.
         // See: https://learn.microsoft.com/en-us/windows/win32/power/wm-powerbroadcast
-        WindowsAndMessaging::WM_POWERBROADCAST => match message_params {
+        os::WindowsAndMessaging::WM_POWERBROADCAST => match message_params {
             // The system is resuming from sleep.
             // See: https://learn.microsoft.com/en-us/windows/win32/power/pbt-apmresumeautomatic
-            WindowsAndMessaging::PBT_APMRESUMEAUTOMATIC => send_event(&event_tx, Event::Resume),
+            os::WindowsAndMessaging::PBT_APMRESUMEAUTOMATIC => send_event(&event_tx, Event::Resume),
 
             // The system is about to sleep.
             // See: https://learn.microsoft.com/en-us/windows/win32/power/pbt-apmsuspend
-            WindowsAndMessaging::PBT_APMSUSPEND => send_event(&event_tx, Event::Suspend),
+            os::WindowsAndMessaging::PBT_APMSUSPEND => send_event(&event_tx, Event::Suspend),
 
             // Power setting change occurred.
             // See: https://learn.microsoft.com/en-us/windows/win32/power/pbt-powersettingchange
-            WindowsAndMessaging::PBT_POWERSETTINGCHANGE => {
+            os::WindowsAndMessaging::PBT_POWERSETTINGCHANGE => {
                 if let Ok(power_settings) = PowerSettings::try_from(lparam)
                     && let new_power_setting = power_settings.Data[0]
                     && let event_target = power_settings.PowerSetting
                     // The current monitor's display state has changed.
                     // See: https://learn.microsoft.com/en-us/windows/win32/power/power-setting-guids
-                    && event_target == SystemServices::GUID_CONSOLE_DISPLAY_STATE
+                    && event_target == os::SystemServices::GUID_CONSOLE_DISPLAY_STATE
                     && new_power_setting == DISPLAY_OFF
                 {
                     send_event(&event_tx, Event::Suspend);
@@ -370,36 +382,40 @@ extern "system" fn handle_window_event(
     defer()
 }
 
-fn key_to_event(key_code: VIRTUAL_KEY, key_state: KeyState) -> Option<Event> {
+fn key_to_event(key_code: os::VIRTUAL_KEY, key_state: KeyState) -> Option<Event> {
     let event = match *key_state {
-        WindowsAndMessaging::WM_KEYDOWN => Event::Press,
-        WindowsAndMessaging::WM_KEYUP => Event::Release,
+        os::WindowsAndMessaging::WM_KEYDOWN => Event::Press,
+        os::WindowsAndMessaging::WM_KEYUP => Event::Release,
         _ => return None,
     };
 
     match key_code {
-        KeyboardAndMouse::VK_VOLUME_DOWN => Some(event(Key::VolumeDown)),
-        KeyboardAndMouse::VK_VOLUME_UP => Some(event(Key::VolumeUp)),
-        KeyboardAndMouse::VK_VOLUME_MUTE => Some(event(Key::VolumeMute)),
+        os::KeyboardAndMouse::VK_VOLUME_DOWN => Some(event(Key::VolumeDown)),
+        os::KeyboardAndMouse::VK_VOLUME_UP => Some(event(Key::VolumeUp)),
+        os::KeyboardAndMouse::VK_VOLUME_MUTE => Some(event(Key::VolumeMute)),
         _ => Some(Event::Focus),
     }
 }
 
-extern "system" fn handle_key_event(ncode: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+extern "system" fn handle_key_event(
+    ncode: i32,
+    wparam: os::WPARAM,
+    lparam: os::LPARAM,
+) -> os::LRESULT {
     /// Indicates the event is a keyboard event.
-    /// See: https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc
+    /// See: <https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc>
     #[allow(clippy::cast_possible_wrap)]
-    const HC_ACTION_I32: i32 = WindowsAndMessaging::HC_ACTION as i32;
+    const HC_ACTION_I32: i32 = os::WindowsAndMessaging::HC_ACTION as i32;
 
-    let defer = || unsafe { CallNextHookEx(None, ncode, wparam, lparam) };
-    let suppress = || LRESULT(1);
+    let defer = || unsafe { os::WindowsAndMessaging::CallNextHookEx(None, ncode, wparam, lparam) };
+    let suppress = || os::LRESULT(1);
 
     // Bail if this isn't a keyboard event.
     if ncode < 0 || ncode != HC_ACTION_I32 {
         return defer();
     }
 
-    let Hook { event_tx } = get_hook!(defer);
+    let OwlState { event_tx } = get_owl_state!(defer);
     let key_event = match KeyEvent::try_from(lparam) {
         Ok(x) => x,
         Err(e) => {
@@ -409,7 +425,7 @@ extern "system" fn handle_key_event(ncode: i32, wparam: WPARAM, lparam: LPARAM) 
     };
 
     let key_code = match u16::try_from(key_event.vkCode) {
-        Ok(x) => VIRTUAL_KEY(x),
+        Ok(x) => os::VIRTUAL_KEY(x),
         Err(e) => {
             error!("failed to convert key code: {e}");
             return defer();
@@ -434,9 +450,9 @@ extern "system" fn handle_key_event(ncode: i32, wparam: WPARAM, lparam: LPARAM) 
     // we're trying to replace software mixing with hardware mixing. The software mixer works
     // by reducing audio bit-depth to make the audio quieter, at the expense of audio quality.
     match key_code {
-        KeyboardAndMouse::VK_VOLUME_DOWN
-        | KeyboardAndMouse::VK_VOLUME_UP
-        | KeyboardAndMouse::VK_VOLUME_MUTE => suppress(),
+        os::KeyboardAndMouse::VK_VOLUME_DOWN
+        | os::KeyboardAndMouse::VK_VOLUME_UP
+        | os::KeyboardAndMouse::VK_VOLUME_MUTE => suppress(),
         _ => defer(),
     }
 }

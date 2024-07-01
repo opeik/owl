@@ -17,6 +17,7 @@
         "LRESULT",
         "ncode",
         "PCWSTR",
+        "unregistering",
         "VREDRAW",
         "WM_KEYUP",
         "WNDCLASSW",
