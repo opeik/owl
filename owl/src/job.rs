@@ -5,7 +5,7 @@ use std::thread::JoinHandle;
 use color_eyre::{eyre::eyre, Result};
 use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
-use tracing::{error};
+use tracing::error;
 
 #[allow(async_fn_in_trait)]
 pub trait Spawn {

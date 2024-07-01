@@ -1,3 +1,10 @@
+cfg_if::cfg_if! {
+    if #[cfg(target_os = "windows")] {
+        pub mod windows;
+        pub use windows::Job;
+    }
+}
+
 use tokio::sync::mpsc;
 
 pub type EventTx = mpsc::UnboundedSender<Event>;
@@ -19,11 +26,4 @@ pub enum Event {
     Focus,
     Press(Key),
     Release(Key),
-}
-
-cfg_if::cfg_if! {
-    if #[cfg(target_os = "windows")] {
-        pub mod windows;
-        pub use windows::Job;
-    }
 }
