@@ -70,7 +70,8 @@ impl From<Cmd> for cec_command {
 impl From<LogicalAddresses> for cec_logical_addresses {
     fn from(addresses: LogicalAddresses) -> Self {
         // cec_logical_addresses.addresses is a 'mask'
-        // cec_logical_addresses.addresses[logical_address value] = 1 when mask contains the address
+        // cec_logical_addresses.addresses[logical_address value] = 1 when mask contains
+        // the address
         let mut data = Self {
             primary: addresses.primary.into(),
             addresses: [0; 16],
@@ -479,7 +480,8 @@ mod tests {
             const AUDIOSYSTEM_INDEX: usize = LogicalAddress::Audiosystem as usize;
             for (mask_index, mask_value) in ffi_secondary.iter().enumerate() {
                 match mask_index {
-                    // Note: also the primary address is in the mask even though it was not provided originally
+                    // Note: also the primary address is in the mask even though it was not provided
+                    // originally
                     PLAYBACKDEVICE2_INDEX | AUDIOSYSTEM_INDEX | PRIMARY_INDEX => {
                         assert_eq!(
                             1, *mask_value,
@@ -532,7 +534,8 @@ mod tests {
 
         /// Assert that
         /// 1) sizes match
-        /// 2) and that the elements of CecDatapacket match the first elements of packet2
+        /// 2) and that the elements of CecDatapacket match the first elements
+        ///    of packet2
         fn assert_eq_packet(packet: DataPacket, packet2: cec_datapacket) {
             assert_eq!(packet.0.len(), packet2.size.into());
             assert!(packet
@@ -662,7 +665,8 @@ mod tests {
                     initiator: LogicalAddress::Playbackdevice1.repr(),
                     opcode: Opcode::ClearAnalogueTimer.repr(),
                     opcode_set: 1,
-                    parameters: DataPacket(parameters).into(), // OK to use here, verified in CecDatapacket unit tests
+                    parameters: DataPacket(parameters).into(), /* OK to use here, verified in
+                                                                * CecDatapacket unit tests */
                     transmit_timeout: 65_000,
                 },
             )
@@ -680,7 +684,8 @@ mod tests {
                 initiator: LogicalAddress::Playbackdevice1.repr(),
                 opcode: Opcode::ClearAnalogueTimer.repr(),
                 opcode_set: 1,
-                parameters: DataPacket(parameters.clone()).into(), // OK to use here, verified in CecDatapacket unit tests
+                parameters: DataPacket(parameters.clone()).into(), /* OK to use here, verified in
+                                                                    * CecDatapacket unit tests */
                 transmit_timeout: 65_000,
             };
             let command: Cmd = ffi_command.try_into().unwrap();

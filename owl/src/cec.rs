@@ -20,8 +20,8 @@ pub type CommandTx = mpsc::Sender<Command>;
 pub type CommandRx = mpsc::Receiver<Command>;
 type LastCmd = HashMap<Command, Instant>;
 
-/// Represents a HDMI-CEC job, responsible for communicating with the HDMI-CEC bus.
-/// libcec only works on a single thread, so we can't use an async task.
+/// Represents a HDMI-CEC job, responsible for communicating with the HDMI-CEC
+/// bus. libcec only works on a single thread, so we can't use an async task.
 pub struct Job {
     cmd_tx: CommandTx,
 }

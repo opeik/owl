@@ -269,7 +269,6 @@ pub struct Cfg {
 
     //
     // cec_configuration items follow up
-    //
     name: String,
 
     ///< the device type(s) to use on the CEC bus for libCEC.
@@ -280,11 +279,14 @@ pub struct Cfg {
     #[builder(default, setter(strip_option))]
     physical_address: Option<u16>,
 
-    ///< the logical address of the device to which the adapter is connected. only used when iPhysicalAddress = 0 or when the adapter doesn't support autodetection.
+    ///< the logical address of the device to which the adapter is connected.
+    /// only used when iPhysicalAddress = 0 or when the adapter doesn't support
+    /// autodetection.
     #[builder(default, setter(strip_option))]
     base_device: Option<LogicalAddress>,
 
-    ///< the HDMI port to which the adapter is connected. only used when iPhysicalAddress = 0 or when the adapter doesn't support autodetection.
+    ///< the HDMI port to which the adapter is connected. only used when
+    /// iPhysicalAddress = 0 or when the adapter doesn't support autodetection.
     #[builder(default, setter(strip_option))]
     hdmi_port: Option<u8>,
 
@@ -292,19 +294,23 @@ pub struct Cfg {
     #[builder(default, setter(strip_option))]
     tv_vendor: Option<u32>,
 
-    ///< list of devices to wake when initialising libCEC or when calling PowerOnDevices() without any parameter..
+    ///< list of devices to wake when initialising libCEC or when calling
+    /// PowerOnDevices() without any parameter..
     #[builder(default, setter(strip_option))]
     wake_devices: Option<LogicalAddresses>,
 
-    /// List of devices to power off when calling StandbyDevices() without any parameter.
+    /// List of devices to power off when calling StandbyDevices() without any
+    /// parameter.
     #[builder(default, setter(strip_option))]
     power_off_devices: Option<LogicalAddresses>,
 
-    /// True to get the settings from the ROM (if set, and a v2 ROM is present), false to use these settings.
+    /// True to get the settings from the ROM (if set, and a v2 ROM is present),
+    /// false to use these settings.
     #[builder(default, setter(strip_option))]
     settings_from_rom: Option<bool>,
 
-    /// Make libCEC the active source on the bus when starting the player application.
+    /// Make libCEC the active source on the bus when starting the player
+    /// application.
     #[builder(default, setter(strip_option))]
     activate_source: Option<bool>,
 
@@ -317,7 +323,8 @@ pub struct Cfg {
     #[builder(default, setter(strip_option))]
     language: Option<String>,
 
-    /// Won't allocate a CCECClient when starting the connection when set (same as monitor mode). added in 1.6.3.
+    /// Won't allocate a CCECClient when starting the connection when set (same
+    /// as monitor mode). added in 1.6.3.
     #[builder(default, setter(strip_option))]
     monitor_only: Option<bool>,
 
@@ -325,7 +332,9 @@ pub struct Cfg {
     #[builder(default, setter(strip_option))]
     adapter_type: Option<AdapterType>,
 
-    /// key code that initiates combo keys. defaults to CEC_USER_CONTROL_CODE_F1_BLUE. CEC_USER_CONTROL_CODE_UNKNOWN to disable. added in 2.0.5.
+    /// key code that initiates combo keys. defaults to
+    /// CEC_USER_CONTROL_CODE_F1_BLUE. CEC_USER_CONTROL_CODE_UNKNOWN to disable.
+    /// added in 2.0.5.
     #[builder(default, setter(strip_option))]
     combo_key: Option<UserControlCode>,
 
@@ -341,11 +350,13 @@ pub struct Cfg {
     #[builder(default, setter(strip_option))]
     button_release_delay: Option<Duration>,
 
-    /// Prevent double taps within this timeout. defaults to 200ms. added in 4.0.0.
+    /// Prevent double taps within this timeout. defaults to 200ms. added in
+    /// 4.0.0.
     #[builder(default, setter(strip_option))]
     double_tap_timeout: Option<Duration>,
 
-    /// Set to 1 to automatically waking an AVR when the source is activated. added in 4.0.0.
+    /// Set to 1 to automatically waking an AVR when the source is activated.
+    /// added in 4.0.0.
     #[builder(default, setter(strip_option))]
     autowake_avr: Option<bool>,
 }
@@ -522,35 +533,63 @@ impl Connection {
     }
 
     // Unimplemented:
-    // extern DECLSPEC int libcec_set_physical_address(libcec_connection_t connection, uint16_t iPhysicalAddress);
-    // extern DECLSPEC int libcec_set_deck_control_mode(libcec_connection_t connection, CEC_NAMESPACE cec_deck_control_mode mode, int bSendUpdate);
-    // extern DECLSPEC int libcec_set_deck_info(libcec_connection_t connection, CEC_NAMESPACE cec_deck_info info, int bSendUpdate);
-    // extern DECLSPEC int libcec_set_menu_state(libcec_connection_t connection, CEC_NAMESPACE cec_menu_state state, int bSendUpdate);
-    // extern DECLSPEC int libcec_set_osd_string(libcec_connection_t connection, CEC_NAMESPACE cec_logical_address iLogicalAddress, CEC_NAMESPACE cec_display_control duration, const char* strMessage);
-    // extern DECLSPEC CEC_NAMESPACE cec_version libcec_get_device_cec_version(libcec_connection_t connection, CEC_NAMESPACE cec_logical_address iLogicalAddress);
-    // extern DECLSPEC int libcec_get_device_menu_language(libcec_connection_t connection, CEC_NAMESPACE cec_logical_address iLogicalAddress, CEC_NAMESPACE cec_menu_language language);
-    // extern DECLSPEC uint32_t libcec_get_device_vendor_id(libcec_connection_t connection, CEC_NAMESPACE cec_logical_address iLogicalAddress);
-    // extern DECLSPEC uint16_t libcec_get_device_physical_address(libcec_connection_t connection, CEC_NAMESPACE cec_logical_address iLogicalAddress);
-    // extern DECLSPEC int libcec_poll_device(libcec_connection_t connection, CEC_NAMESPACE cec_logical_address iLogicalAddress);
-    // extern DECLSPEC CEC_NAMESPACE cec_logical_addresses libcec_get_active_devices(libcec_connection_t connection);
-    // extern DECLSPEC int libcec_is_active_device(libcec_connection_t connection, CEC_NAMESPACE cec_logical_address address);
-    // extern DECLSPEC int libcec_is_active_device_type(libcec_connection_t connection, CEC_NAMESPACE cec_device_type type);
-    // extern DECLSPEC int libcec_set_hdmi_port(libcec_connection_t connection, CEC_NAMESPACE cec_logical_address baseDevice, uint8_t iPort);
-    // extern DECLSPEC int libcec_get_device_osd_name(libcec_connection_t connection, CEC_NAMESPACE cec_logical_address iAddress, CEC_NAMESPACE cec_osd_name name);
-    // extern DECLSPEC int libcec_set_stream_path_logical(libcec_connection_t connection, CEC_NAMESPACE cec_logical_address iAddress);
-    // extern DECLSPEC int libcec_set_stream_path_physical(libcec_connection_t connection, uint16_t iPhysicalAddress);
-    // extern DECLSPEC int libcec_get_current_configuration(libcec_connection_t connection, CEC_NAMESPACE libcec_configuration* configuration);
-    // extern DECLSPEC int libcec_can_persist_configuration(libcec_connection_t connection);
-    // extern DECLSPEC int libcec_persist_configuration(libcec_connection_t connection, CEC_NAMESPACE libcec_configuration* configuration);
-    // extern DECLSPEC int libcec_set_configuration(libcec_connection_t connection, const CEC_NAMESPACE libcec_configuration* configuration);
-    // extern DECLSPEC void libcec_rescan_devices(libcec_connection_t connection);
-    // extern DECLSPEC int libcec_is_libcec_active_source(libcec_connection_t connection);
-    // extern DECLSPEC int libcec_get_device_information(libcec_connection_t connection, const char* strPort, CEC_NAMESPACE libcec_configuration* config, uint32_t iTimeoutMs);
-    // extern DECLSPEC const char* libcec_get_lib_info(libcec_connection_t connection);
-    // extern DECLSPEC void libcec_init_video_standalone(libcec_connection_t connection);
-    // extern DECLSPEC uint16_t libcec_get_adapter_vendor_id(libcec_connection_t connection);
-    // extern DECLSPEC uint16_t libcec_get_adapter_product_id(libcec_connection_t connection);
-    // extern DECLSPEC int8_t libcec_detect_adapters(libcec_connection_t connection, CEC_NAMESPACE cec_adapter_descriptor* deviceList, uint8_t iBufSize, const char* strDevicePath, int bQuickScan);
+    // extern DECLSPEC int libcec_set_physical_address(libcec_connection_t
+    // connection, uint16_t iPhysicalAddress); extern DECLSPEC int
+    // libcec_set_deck_control_mode(libcec_connection_t connection, CEC_NAMESPACE
+    // cec_deck_control_mode mode, int bSendUpdate); extern DECLSPEC int
+    // libcec_set_deck_info(libcec_connection_t connection, CEC_NAMESPACE
+    // cec_deck_info info, int bSendUpdate); extern DECLSPEC int
+    // libcec_set_menu_state(libcec_connection_t connection, CEC_NAMESPACE
+    // cec_menu_state state, int bSendUpdate); extern DECLSPEC int
+    // libcec_set_osd_string(libcec_connection_t connection, CEC_NAMESPACE
+    // cec_logical_address iLogicalAddress, CEC_NAMESPACE cec_display_control
+    // duration, const char* strMessage); extern DECLSPEC CEC_NAMESPACE
+    // cec_version libcec_get_device_cec_version(libcec_connection_t connection,
+    // CEC_NAMESPACE cec_logical_address iLogicalAddress); extern DECLSPEC int
+    // libcec_get_device_menu_language(libcec_connection_t connection, CEC_NAMESPACE
+    // cec_logical_address iLogicalAddress, CEC_NAMESPACE cec_menu_language
+    // language); extern DECLSPEC uint32_t
+    // libcec_get_device_vendor_id(libcec_connection_t connection, CEC_NAMESPACE
+    // cec_logical_address iLogicalAddress); extern DECLSPEC uint16_t
+    // libcec_get_device_physical_address(libcec_connection_t connection,
+    // CEC_NAMESPACE cec_logical_address iLogicalAddress); extern DECLSPEC int
+    // libcec_poll_device(libcec_connection_t connection, CEC_NAMESPACE
+    // cec_logical_address iLogicalAddress); extern DECLSPEC CEC_NAMESPACE
+    // cec_logical_addresses libcec_get_active_devices(libcec_connection_t
+    // connection); extern DECLSPEC int
+    // libcec_is_active_device(libcec_connection_t connection, CEC_NAMESPACE
+    // cec_logical_address address); extern DECLSPEC int
+    // libcec_is_active_device_type(libcec_connection_t connection, CEC_NAMESPACE
+    // cec_device_type type); extern DECLSPEC int
+    // libcec_set_hdmi_port(libcec_connection_t connection, CEC_NAMESPACE
+    // cec_logical_address baseDevice, uint8_t iPort); extern DECLSPEC int
+    // libcec_get_device_osd_name(libcec_connection_t connection, CEC_NAMESPACE
+    // cec_logical_address iAddress, CEC_NAMESPACE cec_osd_name name);
+    // extern DECLSPEC int libcec_set_stream_path_logical(libcec_connection_t
+    // connection, CEC_NAMESPACE cec_logical_address iAddress); extern DECLSPEC
+    // int libcec_set_stream_path_physical(libcec_connection_t connection, uint16_t
+    // iPhysicalAddress); extern DECLSPEC int
+    // libcec_get_current_configuration(libcec_connection_t connection,
+    // CEC_NAMESPACE libcec_configuration* configuration); extern DECLSPEC int
+    // libcec_can_persist_configuration(libcec_connection_t connection);
+    // extern DECLSPEC int libcec_persist_configuration(libcec_connection_t
+    // connection, CEC_NAMESPACE libcec_configuration* configuration);
+    // extern DECLSPEC int libcec_set_configuration(libcec_connection_t connection,
+    // const CEC_NAMESPACE libcec_configuration* configuration); extern DECLSPEC
+    // void libcec_rescan_devices(libcec_connection_t connection);
+    // extern DECLSPEC int libcec_is_libcec_active_source(libcec_connection_t
+    // connection); extern DECLSPEC int
+    // libcec_get_device_information(libcec_connection_t connection, const char*
+    // strPort, CEC_NAMESPACE libcec_configuration* config, uint32_t iTimeoutMs);
+    // extern DECLSPEC const char* libcec_get_lib_info(libcec_connection_t
+    // connection); extern DECLSPEC void
+    // libcec_init_video_standalone(libcec_connection_t connection);
+    // extern DECLSPEC uint16_t libcec_get_adapter_vendor_id(libcec_connection_t
+    // connection); extern DECLSPEC uint16_t
+    // libcec_get_adapter_product_id(libcec_connection_t connection);
+    // extern DECLSPEC int8_t libcec_detect_adapters(libcec_connection_t connection,
+    // CEC_NAMESPACE cec_adapter_descriptor* deviceList, uint8_t iBufSize, const
+    // char* strDevicePath, int bQuickScan);
 }
 
 impl Cfg {
@@ -697,11 +736,11 @@ impl LogicalAddresses {
     /// # Arguments
     ///
     /// * `primary` - Primary address to use
-    /// * `addresses` - other addresses to use. Primary is added to the set if not yet present
+    /// * `addresses` - other addresses to use. Primary is added to the set if
+    ///   not yet present
     ///
     /// Returns `None` in the following cases
     /// * when primary is `Unregistered` and `addresses` is non-empty
-    ///
     pub fn with_primary_and_addresses(
         primary: &KnownLogicalAddress,
         addresses: &HashSet<RegisteredLogicalAddress>,

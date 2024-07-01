@@ -9,7 +9,8 @@ use tracing::error;
 
 #[allow(async_fn_in_trait)]
 pub trait Spawn {
-    /// Spawns a new owl job. Depending on the implementation the job may use tasks or threads.
+    /// Spawns a new owl job. Depending on the implementation the job may use
+    /// tasks or threads.
     async fn spawn(run_token: CancellationToken) -> SpawnResult<Self>
     where
         Self: Sized;

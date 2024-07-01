@@ -7,13 +7,13 @@ use crate::os as owl;
 
 mod api {
     pub use windows::{
-        core::{w, PCWSTR},
+        core::{w, GUID, PCWSTR},
         Win32::{
             Foundation::{HMODULE, HWND, LPARAM, LRESULT, WPARAM},
             System::{
                 LibraryLoader,
                 Power::{self, HPOWERNOTIFY, POWERBROADCAST_SETTING},
-                SystemServices,
+                SystemServices::{self, MONITOR_DISPLAY_STATE},
             },
             UI::{
                 Input::KeyboardAndMouse::{self, VIRTUAL_KEY},
@@ -37,14 +37,20 @@ macro_rules! get_owl_handle {
     };
 }
 
-// I hate global, mutable state as much as you do, but we have no other options. There doesn't appear
-// to be another way to smuggle a reference to our code from win32 land.
+/// A handle to owl.
+///
+/// I hate global, mutable state as much as you do, but we have no other
+/// options. There doesn't appear to be another way to smuggle a reference to
+/// our code from [`windows`] land.
 static OWL_HANDLE: OnceLock<OwlHandle> = OnceLock::new();
 
 #[derive(Debug)]
 pub struct Window {
+    /// See: <https://learn.microsoft.com/en-us/windows/win32/winprog/windows-data-types#HWND>
     pub(crate) handle: api::HWND,
+    /// See: <https://learn.microsoft.com/en-us/windows/win32/winprog/windows-data-types#HHOOK>
     pub(crate) key_hook: api::HHOOK,
+    /// See: <https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerpowersettingnotification>
     pub(crate) power_notify: api::HPOWERNOTIFY,
 }
 
@@ -52,30 +58,41 @@ struct OwlHandle {
     pub event_tx: owl::EventTx,
 }
 
+/// See: <https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-powerbroadcast_setting>
 #[derive(Debug, Clone, Copy, derive_more::Deref)]
-struct PowerSettings(pub api::POWERBROADCAST_SETTING);
+struct PowerEvent(pub api::POWERBROADCAST_SETTING);
 
-#[derive(Debug, Clone, Copy, derive_more::Deref)]
-struct KeyState(pub u32);
-
+/// See: <https://learn.microsoft.com/en-us/windows/win32/inputdev/virtual-key-codes>
 #[derive(Debug, Clone, Copy, derive_more::Deref)]
 struct KeyCode(pub api::VIRTUAL_KEY);
 
+/// See: [`WM_KEYDOWN`] and [`WM_KEYUP`].
+///
+/// [`WM_KEYDOWN`]: https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-keydown
+/// [`WM_KEYUP`]: https://learn.microsoft.com/en-us/windows/win32/inputdev/wm-keyup
 #[derive(Debug, Clone, Copy, derive_more::Deref)]
-struct KeyEventInner(pub api::KBDLLHOOKSTRUCT);
+struct KeyEventKind(pub u32);
+
+/// See: <https://learn.microsoft.com/en-us/windows/win32/api/winuser/ns-winuser-kbdllhookstruct>
+#[derive(Debug, Clone, Copy, derive_more::Deref)]
+struct KeyEventContext(pub api::KBDLLHOOKSTRUCT);
 
 #[derive(Debug, Clone, Copy)]
 struct KeyEvent {
-    pub event: KeyEventInner,
-    pub state: KeyState,
+    pub context: KeyEventContext,
+    pub kind: KeyEventKind,
     pub code: KeyCode,
 }
 
 pub fn event_loop() {
-    // TODO: there's _got_ to be a better way to do this
     let mut msg = api::WindowsAndMessaging::MSG::default();
+
     unsafe {
+        // Get a message from the window's event queue.
+        // See: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getmessagew
         while api::WindowsAndMessaging::GetMessageW(&mut msg, None, 0, 0).into() {
+            // Dispatch the received message.
+            // See: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-dispatchmessagew
             api::WindowsAndMessaging::DispatchMessageW(&msg);
         }
     }
@@ -104,8 +121,10 @@ impl Window {
         })
     }
 
+    /// See: <https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getmodulehandlew>
     fn module_handle() -> Result<api::HMODULE> {
         trace!("getting module handle...");
+
         let module = unsafe {
             api::LibraryLoader::GetModuleHandleW(None).context("failed to get module handle")?
         };
@@ -117,6 +136,7 @@ impl Window {
         Ok(module)
     }
 
+    /// See: <https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerclassw>
     fn new_window_class(module: api::HMODULE) -> Result<api::WNDCLASSW> {
         trace!("registering window class...");
         let window_class = api::WNDCLASSW {
@@ -135,8 +155,10 @@ impl Window {
         Ok(window_class)
     }
 
+    /// See: <https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-createwindowexw>
     fn new_window(module: api::HMODULE) -> Result<api::HWND> {
         trace!("creating window...");
+
         let window = unsafe {
             api::WindowsAndMessaging::CreateWindowExW(
                 api::WINDOW_EX_STYLE::default(),
@@ -162,8 +184,10 @@ impl Window {
         Ok(window)
     }
 
+    /// See: <https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerpowersettingnotification>
     fn new_power_notify(window: api::HWND) -> Result<api::HPOWERNOTIFY> {
         trace!("registering for power notifications...");
+
         unsafe {
             api::Power::RegisterPowerSettingNotification(
                 window,
@@ -174,12 +198,14 @@ impl Window {
         }
     }
 
+    /// See: <https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowshookexw>
     fn new_key_hook(module: api::HMODULE) -> Result<api::HHOOK> {
         trace!("registering key hook...");
+
         unsafe {
             api::WindowsAndMessaging::SetWindowsHookExW(
                 api::WindowsAndMessaging::WH_KEYBOARD_LL,
-                Some(handle_key_event),
+                Some(handle_low_level_key_event),
                 module,
                 0,
             )
@@ -191,8 +217,8 @@ impl Window {
 impl Drop for Window {
     fn drop(&mut self) {
         let inner = |window: &mut Window| -> Result<()> {
-            trace!("posting `WM_CLOSE` message...");
-
+            // See: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postmessagew
+            trace!("requesting the window be closed...");
             unsafe {
                 api::WindowsAndMessaging::PostMessageW(
                     window.handle,
@@ -202,9 +228,11 @@ impl Drop for Window {
                 )?;
             };
 
+            // See: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-unregisterpowersettingnotification
             trace!("unregistering power notifications...");
             unsafe { api::Power::UnregisterPowerSettingNotification(window.power_notify)? };
 
+            // See: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-unhookwindowshookex
             trace!("unregistering key hook...");
             unsafe { api::WindowsAndMessaging::UnhookWindowsHookEx(window.key_hook)? };
             Ok(())
@@ -219,6 +247,18 @@ impl Drop for Window {
 
 unsafe impl Send for Window {}
 
+impl PowerEvent {
+    /// See: <https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/wdm/ne-wdm-_monitor_display_state>
+    fn state(&self) -> api::MONITOR_DISPLAY_STATE {
+        api::MONITOR_DISPLAY_STATE(i32::from(self.Data[0]))
+    }
+
+    /// See: <https://learn.microsoft.com/en-us/windows/win32/power/power-setting-guids>
+    fn target(&self) -> api::GUID {
+        self.PowerSetting
+    }
+}
+
 impl TryFrom<(api::WPARAM, api::LPARAM)> for KeyEvent {
     type Error = color_eyre::eyre::Error;
 
@@ -226,30 +266,30 @@ impl TryFrom<(api::WPARAM, api::LPARAM)> for KeyEvent {
         let wparam = value.0;
         let lparam = value.1;
 
-        let key_event = KeyEventInner::try_from(lparam)?;
-        let key_state = KeyState::try_from(wparam)?;
-        let key_code = key_event.key_code()?;
+        let context = KeyEventContext::try_from(lparam)?;
+        let kind = KeyEventKind::try_from(wparam)?;
+        let code = context.key_code()?;
 
         Ok(Self {
-            event: key_event,
-            state: key_state,
-            code: key_code,
+            context,
+            kind,
+            code,
         })
     }
 }
 
 impl KeyEvent {
     fn to_owl_event(self) -> Option<owl::Event> {
-        let to_event = match *self.state {
+        let owl_event = match *self.kind {
             api::WindowsAndMessaging::WM_KEYDOWN => owl::Event::Press,
             api::WindowsAndMessaging::WM_KEYUP => owl::Event::Release,
             _ => return None,
         };
 
         let result = match *self.code {
-            api::KeyboardAndMouse::VK_VOLUME_DOWN => to_event(owl::Key::VolumeDown),
-            api::KeyboardAndMouse::VK_VOLUME_UP => to_event(owl::Key::VolumeUp),
-            api::KeyboardAndMouse::VK_VOLUME_MUTE => to_event(owl::Key::VolumeMute),
+            api::KeyboardAndMouse::VK_VOLUME_DOWN => owl_event(owl::Key::VolumeDown),
+            api::KeyboardAndMouse::VK_VOLUME_UP => owl_event(owl::Key::VolumeUp),
+            api::KeyboardAndMouse::VK_VOLUME_MUTE => owl_event(owl::Key::VolumeMute),
             _ => owl::Event::Focus,
         };
 
@@ -257,7 +297,7 @@ impl KeyEvent {
     }
 }
 
-impl KeyEventInner {
+impl KeyEventContext {
     fn key_code(&self) -> Result<KeyCode> {
         let inner =
             api::VIRTUAL_KEY(u16::try_from(self.vkCode).context("failed to convert key code")?);
@@ -265,7 +305,7 @@ impl KeyEventInner {
     }
 }
 
-impl TryFrom<api::LPARAM> for KeyEventInner {
+impl TryFrom<api::LPARAM> for KeyEventContext {
     type Error = color_eyre::eyre::Error;
 
     fn try_from(value: api::LPARAM) -> Result<Self> {
@@ -275,25 +315,25 @@ impl TryFrom<api::LPARAM> for KeyEventInner {
             return Err(eyre!("null key event"));
         }
 
-        Ok(KeyEventInner(unsafe { *event }))
+        Ok(KeyEventContext(unsafe { *event }))
     }
 }
 
-impl TryFrom<api::WPARAM> for KeyState {
+impl TryFrom<api::WPARAM> for KeyEventKind {
     type Error = color_eyre::eyre::Error;
 
     fn try_from(value: api::WPARAM) -> Result<Self> {
         match u32::try_from(value.0) {
-            Ok(x) => Ok(KeyState(x)),
+            Ok(x) => Ok(KeyEventKind(x)),
             Err(e) => Err(eyre!("failed to convert key state: {e}")),
         }
     }
 }
 
-impl TryFrom<api::LPARAM> for PowerSettings {
+impl TryFrom<api::LPARAM> for PowerEvent {
     type Error = color_eyre::eyre::Error;
 
-    fn try_from(value: api::LPARAM) -> Result<PowerSettings> {
+    fn try_from(value: api::LPARAM) -> Result<PowerEvent> {
         #[allow(clippy::cast_sign_loss)]
         let power_settings =
             ptr::with_exposed_provenance::<api::POWERBROADCAST_SETTING>(value.0 as usize);
@@ -302,7 +342,7 @@ impl TryFrom<api::LPARAM> for PowerSettings {
             return Err(eyre!("null power settings"));
         }
 
-        Ok(PowerSettings(unsafe { *power_settings }))
+        Ok(PowerEvent(unsafe { *power_settings }))
     }
 }
 
@@ -313,20 +353,22 @@ fn send_event(event_tx: &owl::EventTx, event: owl::Event) {
     };
 }
 
+/// Our window event handler. This allows us listen to a variety of interesting
+/// events, including power events.
+///
+/// See: <https://learn.microsoft.com/en-us/windows/win32/api/winuser/nc-winuser-wndproc>
 extern "system" fn handle_window_event(
     window: api::HWND,
-    message: u32,
+    msg: u32,
     wparam: api::WPARAM,
     lparam: api::LPARAM,
 ) -> api::LRESULT {
-    const DISPLAY_OFF: u8 = 0;
-
-    let defer =
-        || unsafe { api::WindowsAndMessaging::DefWindowProcW(window, message, wparam, lparam) };
+    // See: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-defwindowprocw
+    let defer = || unsafe { api::WindowsAndMessaging::DefWindowProcW(window, msg, wparam, lparam) };
     let ok = || api::LRESULT(0);
     let OwlHandle { event_tx } = get_owl_handle!(defer);
 
-    let message_params = match u32::try_from(wparam.0) {
+    let msg_params = match u32::try_from(wparam.0) {
         Ok(x) => x,
         Err(e) => {
             error!("failed to convert window message params: {e}");
@@ -334,19 +376,22 @@ extern "system" fn handle_window_event(
         }
     };
 
-    match message {
+    match msg {
         // The window should terminate.
         // See: https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-close
         api::WindowsAndMessaging::WM_CLOSE => {
+            // See: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-destroywindow
             trace!("received `WM_CLOSE` event, destroying window...");
             unsafe {
                 api::WindowsAndMessaging::DestroyWindow(window).expect("failed to destroy window");
             };
             return ok();
         }
+
         // The window is being destroyed.
         // See: https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-destroy
         api::WindowsAndMessaging::WM_DESTROY => {
+            // See: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postquitmessage
             trace!("received `WM_DESTROY` event, stopping event loop...");
             unsafe { api::WindowsAndMessaging::PostQuitMessage(0) };
             return ok();
@@ -354,7 +399,7 @@ extern "system" fn handle_window_event(
 
         // A power-management event has occurred.
         // See: https://learn.microsoft.com/en-us/windows/win32/power/wm-powerbroadcast
-        api::WindowsAndMessaging::WM_POWERBROADCAST => match message_params {
+        api::WindowsAndMessaging::WM_POWERBROADCAST => match msg_params {
             // The system is resuming from sleep.
             // See: https://learn.microsoft.com/en-us/windows/win32/power/pbt-apmresumeautomatic
             api::WindowsAndMessaging::PBT_APMRESUMEAUTOMATIC => {
@@ -367,16 +412,13 @@ extern "system" fn handle_window_event(
                 send_event(&event_tx, owl::Event::Suspend);
             }
 
-            // Power setting change occurred.
+            // A power setting change occurred.
             // See: https://learn.microsoft.com/en-us/windows/win32/power/pbt-powersettingchange
             api::WindowsAndMessaging::PBT_POWERSETTINGCHANGE => {
-                if let Ok(power_settings) = PowerSettings::try_from(lparam)
-                    && let new_power_setting = power_settings.Data[0]
-                    && let event_target = power_settings.PowerSetting
-                    // The current monitor's display state has changed.
-                    // See: https://learn.microsoft.com/en-us/windows/win32/power/power-setting-guids
-                    && event_target == api::SystemServices::GUID_CONSOLE_DISPLAY_STATE
-                    && new_power_setting == DISPLAY_OFF
+                if let Ok(power_event) = PowerEvent::try_from(lparam)
+                    // Check the current display is turning off.
+                    && power_event.target() == api::SystemServices::GUID_CONSOLE_DISPLAY_STATE
+                    && power_event.state() == api::SystemServices::PowerMonitorOff
                 {
                     send_event(&event_tx, owl::Event::Suspend);
                 }
@@ -389,7 +431,16 @@ extern "system" fn handle_window_event(
     defer()
 }
 
-extern "system" fn handle_key_event(
+/// Our low-level key event handler. As per the docs, it's important to do our
+/// work as quickly as possible to avoid impacting system performance. We need
+/// to use a low-level hook ([`WH_KEYBOARD_LL`]) as opposed to a normal hook
+/// ([`WH_KEYBOARD`]) since it allow us to suppress certain keys being handled.
+///
+/// See: <https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowshookexw>
+///
+/// [`WH_KEYBOARD`]: https://learn.microsoft.com/en-us/windows/win32/winmsg/keyboardproc
+/// [`WH_KEYBOARD_LL`]: https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc
+extern "system" fn handle_low_level_key_event(
     ncode: i32,
     wparam: api::WPARAM,
     lparam: api::LPARAM,
@@ -399,6 +450,7 @@ extern "system" fn handle_key_event(
     #[allow(clippy::cast_possible_wrap)]
     const HC_ACTION: i32 = api::WindowsAndMessaging::HC_ACTION as i32;
 
+    // See: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-callnexthookex
     let defer = || unsafe { api::WindowsAndMessaging::CallNextHookEx(None, ncode, wparam, lparam) };
     let suppress = || api::LRESULT(1);
 
@@ -414,9 +466,10 @@ extern "system" fn handle_key_event(
             Some(owl_event) => {
                 send_event(&event_tx, owl_event);
 
-                // Unless volume events are suppressed, they'll operate as normal. This isn't desirable since
-                // we're trying to replace software mixing with hardware mixing. The software mixer works
-                // by reducing audio bit-depth to make the audio quieter, at the expense of audio quality.
+                // Unless volume events are suppressed, they'll operate as normal. This isn't
+                // desirable since we're trying to replace software mixing with
+                // hardware mixing. The software mixer works by reducing audio
+                // bit-depth to make the audio quieter, at the expense of audio quality.
                 match *key_event.code {
                     api::KeyboardAndMouse::VK_VOLUME_DOWN
                     | api::KeyboardAndMouse::VK_VOLUME_UP

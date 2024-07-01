@@ -13,7 +13,8 @@ use crate::{
     Spawn,
 };
 
-/// Represents a Windows job, responsible for sending and receiving Windows events.
+/// Represents a Windows job, responsible for sending and receiving Windows
+/// events.
 pub struct Job {
     event_rx: EventRx,
 }
@@ -29,9 +30,10 @@ impl Spawn for Job {
         let join_handle = thread::spawn(move || {
             debug!("os job starting...");
 
-            // Windows will get mad if you try to use resources outside the thread that created it.
-            // Fortunately, the `Drop` implementation sidesteps this with message passing. So,
-            // create the window in the job thread then send it back to async land.
+            // Windows will get mad if you try to use resources outside the thread that
+            // created it. Fortunately, the `Drop` implementation sidesteps this
+            // with message passing. So, create the window in the job thread
+            // then send it back to async land.
             job::send_ready_status(ready_tx, || match Window::new(event_tx.clone()) {
                 Ok(x) => {
                     trace!("sending window handle to task...");
