@@ -40,18 +40,24 @@ macro_rules! get_owl_handle {
 /// A handle to owl.
 ///
 /// I hate global, mutable state as much as you do, but we have no other
-/// options. There doesn't appear to be another way to smuggle a reference to
-/// our code from [`windows`] land.
+/// options. Sure, for [`handle_window_event`] we can use `cbWndExtra` via
+/// [`SetWindowPtrLong`] and [`GetWindowPtrLong`], but that's not an option for
+/// [`handle_low_level_keyboard_event`]. Getting a value from the window
+/// requires us to have a window handle, which the low-level hook doesn't have,
+/// as it doesn't know which window will receive the event.
+///
+/// [`GetWindowPtrLong`]: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-getwindowlongptra
+/// [`SetWindowPtrLong`]: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowlongptrw
 static OWL_HANDLE: OnceLock<OwlHandle> = OnceLock::new();
 
 #[derive(Debug)]
 pub struct Window {
     /// See: <https://learn.microsoft.com/en-us/windows/win32/winprog/windows-data-types#HWND>
-    pub(crate) handle: api::HWND,
+    handle: api::HWND,
     /// See: <https://learn.microsoft.com/en-us/windows/win32/winprog/windows-data-types#HHOOK>
-    pub(crate) key_hook: api::HHOOK,
+    key_hook: api::HHOOK,
     /// See: <https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerpowersettingnotification>
-    pub(crate) power_notify: api::HPOWERNOTIFY,
+    power_notify: api::HPOWERNOTIFY,
 }
 
 struct OwlHandle {
@@ -79,6 +85,7 @@ struct KeyEventContext(pub api::KBDLLHOOKSTRUCT);
 
 #[derive(Debug, Clone, Copy)]
 struct KeyEvent {
+    #[allow(dead_code)]
     pub context: KeyEventContext,
     pub kind: KeyEventKind,
     pub code: KeyCode,
@@ -216,7 +223,7 @@ impl Window {
 
 impl Drop for Window {
     fn drop(&mut self) {
-        let inner = |window: &mut Window| -> Result<()> {
+        let inner = |window: &mut Self| -> Result<()> {
             // See: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postmessagew
             trace!("requesting the window be closed...");
             unsafe {
@@ -315,7 +322,7 @@ impl TryFrom<api::LPARAM> for KeyEventContext {
             return Err(eyre!("null key event"));
         }
 
-        Ok(KeyEventContext(unsafe { *event }))
+        Ok(Self(unsafe { *event }))
     }
 }
 
@@ -324,7 +331,7 @@ impl TryFrom<api::WPARAM> for KeyEventKind {
 
     fn try_from(value: api::WPARAM) -> Result<Self> {
         match u32::try_from(value.0) {
-            Ok(x) => Ok(KeyEventKind(x)),
+            Ok(x) => Ok(Self(x)),
             Err(e) => Err(eyre!("failed to convert key state: {e}")),
         }
     }
@@ -333,7 +340,7 @@ impl TryFrom<api::WPARAM> for KeyEventKind {
 impl TryFrom<api::LPARAM> for PowerEvent {
     type Error = color_eyre::eyre::Error;
 
-    fn try_from(value: api::LPARAM) -> Result<PowerEvent> {
+    fn try_from(value: api::LPARAM) -> Result<Self> {
         #[allow(clippy::cast_sign_loss)]
         let power_settings =
             ptr::with_exposed_provenance::<api::POWERBROADCAST_SETTING>(value.0 as usize);
@@ -342,7 +349,7 @@ impl TryFrom<api::LPARAM> for PowerEvent {
             return Err(eyre!("null power settings"));
         }
 
-        Ok(PowerEvent(unsafe { *power_settings }))
+        Ok(Self(unsafe { *power_settings }))
     }
 }
 

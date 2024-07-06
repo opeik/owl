@@ -4,10 +4,10 @@ use tokio::signal;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info};
 
-#[allow(clippy::ignored_unit_patterns)]
 #[tokio::main]
 async fn main() -> Result<()> {
-    init_tracing();
+    init_tracing()?;
+    color_eyre::install()?;
 
     info!("starting owl...");
     let run_token = CancellationToken::new();
@@ -24,35 +24,43 @@ async fn main() -> Result<()> {
     });
 
     info!("owl ready!");
-    tokio::select! {
-        _ = signal::ctrl_c() => run_token.cancel(),
-        _ = owl_task => error!("owl stopped unexpectedly?!"),
-        _ = run_token.cancelled() => {},
+
+    #[allow(clippy::ignored_unit_patterns)]
+    {
+        tokio::select! {
+            _ = signal::ctrl_c() => {
+                info!("received CTRL+C");
+                run_token.cancel();
+            },
+            _ = owl_task => error!("owl stopped unexpectedly?!"),
+            _ = run_token.cancelled() => error!("run token cancelled?!"),
+        }
     }
 
     info!("stopping owl...");
     for handle in handles {
         handle
             .join()
-            .map_err(|e| eyre!("failed to join thread: {e:?}"))??;
+            .map_err(|e| eyre!("failed to join job handle: {e:?}"))??;
     }
 
     info!("owl stopped!");
     Ok(())
 }
 
-fn init_tracing() {
+fn init_tracing() -> Result<()> {
     use tracing_error::ErrorLayer;
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
     let fmt_layer = fmt::layer();
-    let filter_layer = EnvFilter::try_from_default_env()
-        .or_else(|_| EnvFilter::try_new("owl=trace"))
-        .expect("failed to create tracing environment filter");
+    let filter_layer =
+        EnvFilter::try_from_default_env().or_else(|_| EnvFilter::try_new("owl=trace"))?;
 
     tracing_subscriber::registry()
         .with(filter_layer)
         .with(fmt_layer)
         .with(ErrorLayer::default())
-        .init();
+        .try_init()?;
+
+    Ok(())
 }

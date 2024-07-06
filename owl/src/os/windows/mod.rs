@@ -48,14 +48,16 @@ impl Spawn for Job {
             Result::Ok(())
         });
 
-        let window = window_rx.await?;
-        trace!("received window handle from thread!");
-
         ready_rx
             .await
             .context("failed to read job status")?
             .context("job failed to start")?;
         debug!("os job ready!");
+
+        let window = window_rx
+            .await
+            .context("failed to receive window handle from job")?;
+        trace!("received window handle from job!");
 
         // Dropping the `Window` will stop the event loop, saving us having to poll.
         let _watchdog = tokio::spawn(async move {

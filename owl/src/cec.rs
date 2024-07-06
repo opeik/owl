@@ -153,8 +153,8 @@ impl Spawn for Job {
 impl Command {
     const fn debounce_duration(self) -> Option<Duration> {
         match self {
-            Command::Press(_) | Command::Release(_) => Some(Duration::from_millis(200)),
-            Command::Focus => Some(Duration::from_secs(3)),
+            Self::Press(_) | Self::Release(_) => Some(Duration::from_millis(200)),
+            Self::Focus => Some(Duration::from_secs(3)),
             _ => None,
         }
     }
@@ -211,9 +211,9 @@ impl Cec {
 impl From<Key> for Button {
     fn from(value: Key) -> Self {
         match value {
-            Key::VolumeUp => Button::VolumeUp,
-            Key::VolumeDown => Button::VolumeDown,
-            Key::VolumeMute => Button::VolumeMute,
+            Key::VolumeUp => Self::VolumeUp,
+            Key::VolumeDown => Self::VolumeDown,
+            Key::VolumeMute => Self::VolumeMute,
         }
     }
 }
@@ -221,11 +221,11 @@ impl From<Key> for Button {
 impl From<Event> for Command {
     fn from(value: Event) -> Self {
         match value {
-            Event::Suspend => Command::PowerOff,
-            Event::Resume => Command::PowerOn,
-            Event::Focus => Command::Focus,
-            Event::Press(key) => Command::Press(key.into()),
-            Event::Release(key) => Command::Release(key.into()),
+            Event::Suspend => Self::PowerOff,
+            Event::Resume => Self::PowerOn,
+            Event::Focus => Self::Focus,
+            Event::Press(key) => Self::Press(key.into()),
+            Event::Release(key) => Self::Release(key.into()),
         }
     }
 }
