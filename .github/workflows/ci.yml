@@ -12,10 +12,16 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Build
+      - name: Run bindgen
         run: |
           rustup toolchain install stable --profile minimal
-          cargo build
+          cargo run --bin cec_bindgen
+
+      - name: Run debug tests
+        run: cargo test
+
+      - name: Run release tests
+        run: cargo test --release
 
   build-macos:
     runs-on: macos-latest
@@ -26,8 +32,14 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
-      - name: Build
-        run: nix develop --command cargo build
+      - name: Run bindgen
+        run: nix develop --command cargo run --bin cec_bindgen
+
+      - name: Run debug tests
+        run: nix develop --command cargo test
+
+      - name: Run release tests
+        run: nix develop --command cargo test --release
 
   build-linux:
     runs-on: ubuntu-latest
@@ -37,6 +49,9 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Run bindgen
+        run: nix develop --command cargo run --bin cec_bindgen
 
       - name: Run debug tests
         run: nix develop --command cargo test
