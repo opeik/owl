@@ -10,7 +10,7 @@ use crate::{
 pub struct Job;
 
 impl Spawn for Job {
-    /// Spawns a new macOS job.
+    /// Spawns a new Linux job.
     async fn spawn(_run_token: CancellationToken) -> SpawnResult<Self> {
         unimplemented!()
     }
