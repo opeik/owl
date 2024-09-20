@@ -15,7 +15,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - uses: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile default
+      - run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile default
       - uses: Swatinem/rust-cache@v2
 
       - name: Run bindgen
@@ -43,7 +43,7 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
-      - uses: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile default
+      - run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile default
       - uses: Swatinem/rust-cache@v2
 
       - name: Run bindgen
@@ -71,7 +71,7 @@ jobs:
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
 
-      - uses: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile default
+      - run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile default
       - uses: Swatinem/rust-cache@v2
 
       - name: Run bindgen
