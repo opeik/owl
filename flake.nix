@@ -24,20 +24,21 @@
           # `nix fmt`
           formatter = alejandra;
           # `nix develop`
-          devShell = pkgs.mkShellNoCC {
-            packages = [
-              self.formatter.${system}
-              nil
-              cargo-expand
-              cargo-udeps
-              (rust-bin.fromRustupToolchainFile ./rust-toolchain.toml)
-              (with darwin.apple_sdk.frameworks; [
+          devShell = pkgs.mkShell {
+            packages =
+              [
+                self.formatter.${system}
+                nil
+                cargo-expand
+                cargo-udeps
+                (rust-bin.fromRustupToolchainFile ./rust-toolchain.toml)
+              ]
+              ++ (lib.optional stdenv.isDarwin (with darwin.apple_sdk.frameworks; [
                 SystemConfiguration
                 CoreFoundation
                 IOKit
                 CoreVideo
-              ])
-            ];
+              ]));
           };
         }
     );
