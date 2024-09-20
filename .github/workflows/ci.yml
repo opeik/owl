@@ -28,8 +28,8 @@ jobs:
       - name: Upload bindings
         uses: actions/upload-artifact@v4
         with:
-          name: aarch64-apple-darwin.rs
-          path: cec_sys/src/bindings/aarch64-apple-darwin.rs
+          name: x86_64-pc-windows-msvc
+          path: cec_sys/src/bindings/x86_64-pc-windows-msvc.rs
           if-no-files-found: error
 
       - name: Run debug tests
@@ -84,8 +84,8 @@ jobs:
       - name: Upload bindings
         uses: actions/upload-artifact@v4
         with:
-          name: aarch64-apple-darwin.rs
-          path: cec_sys/src/bindings/aarch64-apple-darwin.rs
+          name: x86_64-unknown-linux-gnu.rs
+          path: cec_sys/src/bindings/x86_64-unknown-linux-gnu.rs
           if-no-files-found: error
 
       - name: Run debug tests
