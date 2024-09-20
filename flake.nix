@@ -24,7 +24,9 @@
           # `nix fmt`
           formatter = alejandra;
           # `nix develop`
-          devShell = pkgs.mkShell {
+          devShell = mkShell {
+            LIBCLANG_PATH = "${llvmPackages_16.libclang.lib}/lib";
+
             packages =
               [
                 self.formatter.${system}
@@ -33,7 +35,7 @@
                 cargo-udeps
                 (rust-bin.fromRustupToolchainFile ./rust-toolchain.toml)
               ]
-              ++ (lib.optional stdenv.isLinux [openssl.dev llvmPackages_16.libclang])
+              ++ (lib.optional stdenv.isLinux [openssl.dev])
               ++ (lib.optional stdenv.isDarwin (with darwin.apple_sdk.frameworks; [
                 SystemConfiguration
                 CoreFoundation
