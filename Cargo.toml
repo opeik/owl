@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["owl", "cec_sys", "cec"]
+members = ["owl", "cec_sys", "cec_bindgen", "cec"]
 
 [profile.dev.package.backtrace]
 opt-level = 3

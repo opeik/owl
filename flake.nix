@@ -1,7 +1,7 @@
 # Nix flake, see: https://nixos.org/manual/nix/stable/command-ref/new-cli/nix3-flake
 {
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:NixOS/nixpkgs/nixos-24.05";
     flake-utils.url = "github:numtide/flake-utils";
     rust-overlay.url = "github:oxalica/rust-overlay";
   };
@@ -24,14 +24,18 @@
           # `nix fmt`
           formatter = alejandra;
           # `nix develop`
-          devShells.default = mkShell {
+          devShell = pkgs.mkShellNoCC {
             packages = [
               self.formatter.${system}
+              nil
               cargo-expand
               cargo-udeps
               (rust-bin.fromRustupToolchainFile ./rust-toolchain.toml)
               (with darwin.apple_sdk.frameworks; [
                 SystemConfiguration
+                CoreFoundation
+                IOKit
+                CoreVideo
               ])
             ];
           };
