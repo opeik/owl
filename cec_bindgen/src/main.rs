@@ -14,10 +14,10 @@ use color_eyre::eyre::{eyre, Result};
 #[derive(clap::Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Args {
-    #[arg(short, long, default_value = ".")]
+    #[arg(short, long, default_value = "cec_bindgen")]
     src_path: String,
-    #[arg(short, long, default_value = "wrapper.rs")]
-    dest_path: String,
+    #[arg(short, long)]
+    dest_path: Option<String>,
 }
 
 fn main() -> Result<()> {
@@ -28,7 +28,11 @@ fn main() -> Result<()> {
     let build_path = PathBuf::from(tmp_dir.path());
     let src_path = PathBuf::from(args.src_path);
     let lib_path = build_path.join("libcec");
-    let out_path = PathBuf::from(args.dest_path);
+    let out_path = PathBuf::from(match args.dest_path {
+        Some(x) => x,
+        None => format!("cec_sys/src/{}.rs", target_lexicon::HOST),
+    });
+
     dbg!(build_path);
 
     // Building libcec from source is _painful_.

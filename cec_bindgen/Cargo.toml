@@ -1,5 +1,5 @@
 [package]
-name = "cec_sys_bindgen"
+name = "cec_bindgen"
 version = "0.1.0"
 edition = "2021"
 
@@ -12,3 +12,4 @@ zip-extract = "0.1"
 bcmp = "0.4"
 tempfile = "3"
 clap = { version = "4", features = ["derive"] }
+target-lexicon = "0.12"
