@@ -30,7 +30,7 @@ fn main() -> Result<()> {
     let lib_path = build_path.join("libcec");
     let out_path = PathBuf::from(match args.dest_path {
         Some(x) => x,
-        None => format!("cec_sys/src/{}.rs", target_lexicon::HOST),
+        None => format!("cec_sys/src/bindings/{}.rs", target_lexicon::HOST),
     });
 
     dbg!(build_path);
