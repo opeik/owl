@@ -15,6 +15,7 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - run: winget install LLVM.LLVM
       - run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile default
       - uses: Swatinem/rust-cache@v2
 
