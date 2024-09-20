@@ -18,7 +18,7 @@ jobs:
       - name: Install winget
         uses: Cyberboss/install-winget@v1
 
-      - run: winget install LLVM.LLVM --accept-package-agreements
+      - run: winget install LLVM.LLVM --accept-source-agreements --accept-package-agreements
       - run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile default
       - uses: Swatinem/rust-cache@v2
 
