@@ -9,7 +9,21 @@ use bcmp::AlgoSpec;
 use bindgen::callbacks::ParseCallbacks;
 use cfg_if::cfg_if;
 use clap::Parser;
-use color_eyre::eyre::{eyre, Result};
+use color_eyre::eyre::Result;
+
+#[derive(Debug)]
+pub enum BuildKind {
+    Debug,
+    Release,
+}
+
+cfg_if! {
+    if #[cfg(debug_assertions)] {
+        const BUILD_KIND: BuildKind = BuildKind::Debug;
+    } else {
+        const BUILD_KIND: BuildKind = BuildKind::Release;
+    }
+}
 
 #[derive(clap::Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -35,7 +49,7 @@ fn main() -> Result<()> {
 
     dbg!(build_path);
 
-    // Building libcec from source is _painful_.
+    // Building libcec from source is _painful_, so we don't!
     download_libcec(&lib_path)?;
     run_bindgen(&src_path, &lib_path, &out_path)?;
     dbg!(&out_path);
@@ -44,27 +58,11 @@ fn main() -> Result<()> {
 }
 
 fn download_libcec<P: AsRef<Path>>(path: P) -> Result<()> {
-    cfg_if! {
-        if #[cfg(debug_assertions)] {
-            let kind = "debug";
-        } else {
-            let kind = "release";
-        }
-    }
+    let target = target_lexicon::HOST.to_string();
+    let build_kind = BUILD_KIND;
 
-    let os = match std::env::consts::OS {
-        x @ ("windows" | "macos" | "linux") => x,
-        _ => return Err(eyre!("invalid arch")),
-    };
-
-    let arch = match std::env::consts::ARCH {
-        "x86_64" => "amd64",
-        "aarch64" => "arm64",
-        _ => return Err(eyre!("invalid arch")),
-    };
-
-    let url = format!("https://github.com/opeik/libcec-vendor/releases/download/v0.1.0/libcec-6.0.2-{os}-{arch}-{kind}.zip");
-    dbg!(&kind, &arch, &url);
+    let url = format!("https://github.com/opeik/libcec-vendor/releases/download/v0.1.0/libcec-6.0.2-{target}-{build_kind}.zip");
+    dbg!(target, build_kind, &url);
     if !path.as_ref().exists() {
         let file = reqwest::blocking::get(url)?.bytes()?;
         zip_extract::extract(Cursor::new(file), path.as_ref(), true)?;
@@ -222,4 +220,15 @@ impl ParseCallbacks for TidySymbols {
     fn func_macro(&self, _name: &str, _value: &[&[u8]]) {}
     fn include_file(&self, _filename: &str) {}
     fn read_env_var(&self, _key: &str) {}
+}
+
+impl std::fmt::Display for BuildKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            BuildKind::Debug => "debug",
+            BuildKind::Release => "release",
+        };
+
+        write!(f, "{s}")
+    }
 }
