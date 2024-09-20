@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
 
+env:
+  RUST_TOOLCHAIN: nightly-2024-09-20
+
 jobs:
   build-windows:
     runs-on: windows-latest
@@ -12,10 +15,11 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
+      - uses: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile default
+      - uses: Swatinem/rust-cache@v2
+
       - name: Run bindgen
-        run: |
-          rustup toolchain install stable --profile minimal
-          cargo run --bin cec_bindgen
+        run: cargo run --bin cec_bindgen
 
       - name: Run debug tests
         run: cargo test
@@ -38,6 +42,9 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+
+      - uses: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile default
+      - uses: Swatinem/rust-cache@v2
 
       - name: Run bindgen
         run: nix develop --command cargo run --bin cec_bindgen
@@ -63,6 +70,9 @@ jobs:
 
       - name: Install Nix
         uses: DeterminateSystems/nix-installer-action@main
+
+      - uses: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile default
+      - uses: Swatinem/rust-cache@v2
 
       - name: Run bindgen
         run: nix develop --command cargo run --bin cec_bindgen

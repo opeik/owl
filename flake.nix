@@ -33,6 +33,7 @@
                 cargo-udeps
                 (rust-bin.fromRustupToolchainFile ./rust-toolchain.toml)
               ]
+              ++ (lib.optional stdenv.isLinux [openssl.dev])
               ++ (lib.optional stdenv.isDarwin (with darwin.apple_sdk.frameworks; [
                 SystemConfiguration
                 CoreFoundation
