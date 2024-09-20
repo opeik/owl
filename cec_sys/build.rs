@@ -50,7 +50,7 @@ fn main() -> Result<()> {
             println!("cargo:rustc-link-lib=framework=IOKit");
         }
         (OperatingSystem::Linux, _) => {
-            println!("cargo:rustc-link-lib=dylib=c++");
+            println!("cargo:rustc-link-lib=dylib=stdc++");
         }
         _ => return Err(eyre!("unsupported target")),
     };
