@@ -12,9 +12,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Checkout repo
-      uses: actions/checkout@v4
-
     - name: Install Nix
       uses: DeterminateSystems/nix-installer-action@main
 

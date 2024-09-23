@@ -14,6 +14,9 @@ jobs:
     env:
       LIBCLANG_PATH: 'C:\Program Files\LLVM\lib'
     steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
       - name: Test owl
         uses: ./.github/actions/test-owl-unix
         with:
@@ -23,6 +26,9 @@ jobs:
   test-macos:
     runs-on: macos-latest
     steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
       - name: Test owl
         uses: ./.github/actions/test-owl-unix
         with:
@@ -32,6 +38,9 @@ jobs:
   test-linux:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
       - name: Test owl
         uses: ./.github/actions/test-owl-unix
         with:
