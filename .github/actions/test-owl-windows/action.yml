@@ -12,9 +12,6 @@ inputs:
 runs:
   using: composite
   steps:
-    - name: Install Nix
-      uses: DeterminateSystems/nix-installer-action@main
-
     - name: Setup Rust cache toolchain
       run: rustup toolchain install ${{ inputs.rust_toolchain }} --profile default
       shell: bash

@@ -18,7 +18,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Test owl
-        uses: ./.github/actions/test-owl-unix
+        uses: ./.github/actions/test-owl-windows
         with:
           target: x86_64-pc-windows-msvc
           rust_toolchain: ${{ env.RUST_TOOLCHAIN }}
