@@ -67,3 +67,4 @@ runs:
         add: cec_sys/src/bindings/${{ inputs.target }}.rs
         message: Update ${{ inputs.target }} libcec bindings
         pathspec_error_handling: exitImmediately
+        pull: --rebase --autostash
