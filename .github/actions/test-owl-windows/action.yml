@@ -31,21 +31,21 @@ runs:
 
     - name: Generate missing bindings
       if: ${{ steps.check_bindings_exist.outputs.bindings_exist }} == 'false'
-      run: nix develop --command cargo run --bin cec_bindgen
-      shell: bash
+      run: cargo run --bin cec_bindgen
+      shell: pwsh
 
     - name: Run debug tests
-      run: nix develop --command cargo test
-      shell: bash
+      run: cargo test
+      shell: pwsh
 
     - name: Run release tests
-      run: nix develop --command cargo test --release
-      shell: bash
+      run: cargo test --release
+      shell: pwsh
 
     - name: Regenerate bindings
       if: ${{ steps.check_bindings_exist.outputs.bindings_exist }} == 'true'
-      run: nix develop --command cargo run --bin cec_bindgen
-      shell: bash
+      run: cargo run --bin cec_bindgen
+      shell: pwsh
 
     - name: Commit bindings
       if: ${{ steps.check_bindings_exist.outputs.bindings_exist }} == 'true'
