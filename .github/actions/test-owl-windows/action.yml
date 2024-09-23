@@ -24,9 +24,9 @@ runs:
       shell: bash
       run: |
         if [ -f 'cec_sys/src/bindings/${{ inputs.target }}.rs'  ]; then
-          echo 'BINDINGS_EXIST="false"' >> "$GITHUB_OUTPUT"
-        else
           echo 'BINDINGS_EXIST="true"' >> "$GITHUB_OUTPUT"
+        else
+          echo 'BINDINGS_EXIST="false"' >> "$GITHUB_OUTPUT"
         fi
 
     - name: Generate missing bindings
