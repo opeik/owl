@@ -28,3 +28,11 @@ owl
 
 [cec-adapter]: https://www.pulse-eight.com/p/104/usb-hdmi-cec-adapter
 [libcec]: https://github.com/Pulse-Eight/libcec
+
+# License
+
+This project is licensed under GPLv2. The [`cec`](./cec) and [`cec_sys`](./cec_sys) crates are modified versions of
+[cec-rs] and [libcec-sys], respectively, and maintains their original GPLv2 license.
+
+[cec-rs]: https://github.com/ssalonen/cec-rs
+[libcec-sys]: https://github.com/ssalonen/libcec-sys
