@@ -23,7 +23,7 @@ runs:
       uses: Swatinem/rust-cache@v2
 
     - name: Check if target bindings exist
-      if: check_bindings_exist
+      id: check_bindings_exist
       shell: bash
       run: |
         if [ -f 'cec_sys/src/bindings/${{ inputs.target }}.rs'  ]; then
