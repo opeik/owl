@@ -36,7 +36,7 @@ runs:
       id: check_bindings_exist
       shell: pwsh
       run: |
-        if (Test-Path -path $FilePath -PathType Leaf) {
+        if (Test-Path -path 'cec_sys\src\bindings\${{ inputs.target }}.rs' -PathType Leaf) {
           'bindings_exist=true' >> $env:GITHUB_OUTPUT
         } else {
           'bindings_exist=false' >> $env:GITHUB_OUTPUT
