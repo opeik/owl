@@ -34,13 +34,13 @@ runs:
 
     - name: Check if target bindings exist
       id: check_bindings_exist
-      shell: bash
+      shell: pwsh
       run: |
-        if [ -f 'cec_sys/src/bindings/${{ inputs.target }}.rs'  ]; then
-          echo 'bindings_exist="true"' >> "$GITHUB_OUTPUT"
-        else
-          echo 'bindings_exist="false"' >> "$GITHUB_OUTPUT"
-        fi
+        if (Test-Path -path $FilePath -PathType Leaf) {
+          'bindings_exist=true' >> $env:GITHUB_OUTPUT
+        } else {
+          'bindings_exist=false' >> $env:GITHUB_OUTPUT
+        }
 
     - name: Generate missing bindings
       if: steps.check_bindings_exist.outputs.bindings_exist == 'false'

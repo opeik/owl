@@ -17,7 +17,7 @@ runs:
       shell: bash
       run: |
         rust_toolchain="$(nix develop --command dasel --write plain --file rust-toolchain.toml 'toolchain.channel')"
-        printf 'rust_toolchain="%s"' "$rust_toolchain" >> "$GITHUB_OUTPUT"
+        echo "rust_toolchain=$rust_toolchain" >> "$GITHUB_OUTPUT"
 
     - name: Setup Rust cache toolchain
       run: rustup toolchain install ${{ steps.get_rust_toolchain.outputs.rust_toolchain }} --profile default
@@ -31,9 +31,9 @@ runs:
       shell: bash
       run: |
         if [ -f 'cec_sys/src/bindings/${{ inputs.target }}.rs'  ]; then
-          echo 'bindings_exist="false"' >> "$GITHUB_OUTPUT"
+          echo 'bindings_exist=false' >> "$GITHUB_OUTPUT"
         else
-          echo 'bindings_exist="true"' >> "$GITHUB_OUTPUT"
+          echo 'bindings_exist=true' >> "$GITHUB_OUTPUT"
         fi
 
     - name: Generate missing bindings
