@@ -1,5 +1,7 @@
+name: Test owl
+
 permissions:
-  contents: read
+  contents: write
 
 on:
   push:
