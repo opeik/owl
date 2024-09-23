@@ -115,10 +115,10 @@ jobs:
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: libcec-${{ github.event.inputs.libcec_version }}
+          tag_name: libcec-v${{ github.event.inputs.libcec_version }}
           files: release/*.zip
           fail_on_unmatched_files: true
           make_latest: true
-          body: |
+          body: >
             This release includes automated [libcec](https://github.com/Pulse-Eight/libcec)
             builds for version ${{ github.event.inputs.libcec_version }}.
