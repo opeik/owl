@@ -36,7 +36,7 @@
 
               libcec =
                 [ninja cmake clang_16]
-                ++ (lib.optional stdenv.isLinux [openssl.dev])
+                ++ (lib.optional stdenv.isLinux [openssl.dev pkg-config systemd])
                 ++ (lib.optional stdenv.isDarwin (with darwin.apple_sdk.frameworks; [
                   SystemConfiguration
                   CoreFoundation
