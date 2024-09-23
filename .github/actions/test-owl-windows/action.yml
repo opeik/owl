@@ -43,7 +43,7 @@ runs:
         }
 
     - name: Generate missing bindings
-      if: steps.check_bindings_exist.outputs.bindings_exist == 'false'
+      if: ${{ ! steps.check_bindings_exist.outputs.bindings_exist }}
       run: cargo run --bin cec_bindgen
       shell: pwsh
 
@@ -56,12 +56,12 @@ runs:
       shell: pwsh
 
     - name: Regenerate bindings
-      if: steps.check_bindings_exist.outputs.bindings_exist == 'true'
+      if: ${{ steps.check_bindings_exist.outputs.bindings_exist }}
       run: cargo run --bin cec_bindgen
       shell: pwsh
 
     - name: Commit bindings
-      if: steps.check_bindings_exist.outputs.bindings_exist == 'true'
+      if: ${{ steps.check_bindings_exist.outputs.bindings_exist }}
       uses: EndBug/add-and-commit@v9
       with:
         add: cec_sys/src/bindings/${{ inputs.target }}.rs

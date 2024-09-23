@@ -37,7 +37,7 @@ runs:
         fi
 
     - name: Generate missing bindings
-      if: ${{ steps.check_bindings_exist.outputs.bindings_exist }} == 'false'
+      if: ${{ ! steps.check_bindings_exist.outputs.bindings_exist }}
       run: nix develop --command cargo run --bin cec_bindgen
       shell: bash
 
@@ -50,12 +50,12 @@ runs:
       shell: bash
 
     - name: Regenerate bindings
-      if: ${{ steps.check_bindings_exist.outputs.bindings_exist }} == 'true'
+      if: ${{ steps.check_bindings_exist.outputs.bindings_exist }}
       run: nix develop --command cargo run --bin cec_bindgen
       shell: bash
 
     - name: Commit bindings
-      if: ${{ steps.check_bindings_exist.outputs.bindings_exist }} == 'true'
+      if: ${{ steps.check_bindings_exist.outputs.bindings_exist }}
       uses: EndBug/add-and-commit@v9
       with:
         add: cec_sys/src/bindings/${{ inputs.target }}.rs
