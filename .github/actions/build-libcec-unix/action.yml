@@ -1,0 +1,39 @@
+name: build-libcec-unix
+description: Builds libcec on Unix environments.
+
+inputs:
+  arch:
+    description: The architecture being built.
+    required: true
+  build_type:
+    description: The build type, either "release" or "debug".
+    required: true
+  libcec_version:
+    description: The libcec version to build.
+    required: true
+
+outputs:
+  binary_path:
+    description: The freshly-built binary path.
+    value: ${{ steps.set_output.outputs.binary_path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout libcec
+      uses: actions/checkout@v4
+      with:
+        path: libcec
+        repository: opeik/libcec
+
+    - name: Install Nix
+      uses: DeterminateSystems/nix-installer-action@main
+
+    - name: Build libcec
+      shell: bash
+      run: nix develop --command $GITHUB_ACTION_PATH/build.sh '${{ github.workspace }}/libcec' '${{ matrix.build_type }}'
+
+    - name: Set output
+      id: set_output
+      shell: bash
+      run: echo "binary_path=${{ github.workspace }}/libcec/dist" >> $GITHUB_OUTPUT

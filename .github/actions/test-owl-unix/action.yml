@@ -1,0 +1,61 @@
+name: test-owl-unix
+description: Tests owl on Unix environments.
+
+inputs:
+  target:
+    description: The target triple being tested.
+    required: true
+  rust_toolchain:
+    description: The Rust toolchain to use.
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout repo
+      uses: actions/checkout@v4
+
+    - name: Install Nix
+      uses: DeterminateSystems/nix-installer-action@main
+
+    - name: Setup Rust cache toolchain
+      run: rustup toolchain install ${{ inputs.rust_toolchain }} --profile default
+      shell: bash
+
+    - name: Setup Rust cache
+      uses: Swatinem/rust-cache@v2
+
+    - name: Check if target bindings exist
+      if: check_bindings_exist
+      shell: bash
+      run: |
+        if [ -f 'cec_sys/src/bindings/${{ inputs.target }}.rs'  ]; then
+          echo 'BINDINGS_EXIST="false"' >> "$GITHUB_OUTPUT"
+        else
+          echo 'BINDINGS_EXIST="true"' >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Generate missing bindings
+      if: ${ steps.check_bindings_exist.outputs.bindings_exist } == 'false'
+      run: nix develop --command cargo run --bin cec_bindgen
+      shell: bash
+
+    - name: Run debug tests
+      run: nix develop --command cargo test
+      shell: bash
+
+    - name: Run release tests
+      run: nix develop --command cargo test --release
+      shell: bash
+
+    - name: Regenerate bindings
+      if: ${ steps.check_bindings_exist.outputs.bindings_exist } == 'true'
+      run: nix develop --command cargo run --bin cec_bindgen
+      shell: bash
+
+    - name: Commit bindings
+      uses: EndBug/add-and-commit@v9
+      with:
+        add: cec_sys/src/bindings/${{ inputs.target }}.rs
+        message: Update ${{ inputs.target }} libcec bindings
+        pathspec_error_handling: exitImmediately

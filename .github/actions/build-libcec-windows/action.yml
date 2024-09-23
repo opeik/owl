@@ -1,0 +1,112 @@
+name: build-libcec-windows
+description: Builds libcec on Windows environments.
+
+inputs:
+  arch:
+    description: The architecture being built.
+    required: true
+  build_type:
+    description: The build type, either "release" or "debug".
+    required: true
+  libcec_version:
+    description: The libcec version to build.
+    required: true
+  visual_studio_version:
+    description: The Visual Studio version to use.
+    required: true
+  python_version:
+    description: The Python version to use.
+    required: false
+    default: "3.12.4"
+
+outputs:
+  binary_path:
+    description: The freshly-built binary path.
+    value: ${{ steps.set_output.outputs.binary_path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Checkout libcec
+      uses: actions/checkout@v4
+      with:
+        path: libcec
+        repository: opeik/libcec
+
+    - name: Install Python
+      shell: pwsh
+      working-directory: libcec
+      run: |
+        Set-PSDebug -Strict
+        Set-PSDebug -Trace 2
+
+        # CMake will try to use the version of Python shipped with the GHA runner and get very confused.
+        # We could delete it, but that takes forever. We could tell CMake to use our version, but building
+        # libcec requires using a godforsaken batch script and trying to accomplish anything in there is
+        # like oil wrestling in the dark. Moving the Python installation works fine.
+        echo 'removing pre-installed python version...'
+        Move-Item -Force 'C:/hostedtoolcache/windows/Python' 'C:/hostedtoolcache/stop'
+
+        # Only x86_64 is supported, for now.
+        if ( '${{ matrix.arch }}' -ne "x86_64" ) {
+          throw "unsupported arch"
+        }
+
+        echo 'downloading python ${{ inputs.python_version }}...'
+        $file_path = "${{ inputs.python_version }}/python-${{ inputs.python_version }}-amd64.exe"
+        curl -o 'python_installer.exe' "https://www.python.org/ftp/python/$file_path"
+
+        echo 'installing python ${{ inputs.python_version }}...'
+        .\python_installer.exe '/quiet' 'Include_debug=1' 'PrependPath=1' 'InstallAllUsers=1'
+
+    - name: Setup developer command prompt
+      uses: ilammy/msvc-dev-cmd@v1
+      with:
+        arch: amd64
+
+    - name: Build libcec
+      shell: pwsh
+      env:
+        CL: /MP
+      run: |
+        Set-PSDebug -Strict
+        Set-PSDebug -Trace 2
+
+        echo 'setting up build environment...'
+        mkdir -p '${{ github.workspace }}\libcec\build'
+        mkdir -p '${{ github.workspace }}\libcec\dist'
+
+        [string[]] $script_paths = @(
+          '${{ github.workspace }}\libcec\src\platform\windows\build-lib.cmd'
+          '${{ github.workspace }}\libcec\windows\build-lib.cmd'
+        )
+
+        [string] $build_type = if ( '${{ inputs.build_type }}' -eq 'debug' ) {
+          'Debug'
+        } elseif ( '${{ inputs.build_type }}' -eq 'release' ) {
+          'RelWithDebInfo'
+        } else {
+          throw "invalid build type"
+        }
+
+        [string[]] $script_args = @(
+          'amd64'
+          $build_type
+          '${{ inputs.visual_studio_version }}'
+          '"${{ github.workspace }}\libcec\build"'
+          'nmake'
+        )
+
+        foreach ($script_path in $script_paths) {
+          &"$script_path" $script_args
+        }
+
+        echo "copying binaries to dist..."
+        Get-ChildItem -Recurse -Path '${{ github.workspace }}\libcec\build' -Include *.lib,*.dll,*.pdb |
+          Copy-Item -Destination '${{ github.workspace }}\libcec\dist'
+        Copy-Item -Recurse -Path '${{ github.workspace }}\libcec\include' -Destination '${{ github.workspace }}\libcec\dist'
+
+    - name: Set output
+      id: set_output
+      shell: bash
+      run: echo "binary_path=${{ github.workspace }}\libcec\dist" >> $GITHUB_OUTPUT
