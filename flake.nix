@@ -24,25 +24,31 @@
           # `nix fmt`
           formatter = alejandra;
           # `nix develop`
-          devShell = mkShell {
-            LIBCLANG_PATH = "${llvmPackages_16.libclang.lib}/lib";
-
-            packages =
-              [
+          devShell = let
+            tools = {
+              owl = [
                 self.formatter.${system}
                 nil
                 cargo-expand
                 cargo-udeps
                 (rust-bin.fromRustupToolchainFile ./rust-toolchain.toml)
-              ]
-              ++ (lib.optional stdenv.isLinux [openssl.dev])
-              ++ (lib.optional stdenv.isDarwin (with darwin.apple_sdk.frameworks; [
-                SystemConfiguration
-                CoreFoundation
-                IOKit
-                CoreVideo
-              ]));
-          };
+              ];
+
+              libcec =
+                [ninja cmake clang_16]
+                ++ (lib.optional stdenv.isLinux [openssl.dev])
+                ++ (lib.optional stdenv.isDarwin (with darwin.apple_sdk.frameworks; [
+                  SystemConfiguration
+                  CoreFoundation
+                  IOKit
+                  CoreVideo
+                ]));
+            };
+          in
+            mkShell {
+              LIBCLANG_PATH = "${llvmPackages_16.libclang.lib}/lib";
+              packages = tools.owl ++ tools.libcec;
+            };
         }
     );
 }
