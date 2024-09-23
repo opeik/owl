@@ -61,7 +61,7 @@ fn download_libcec<P: AsRef<Path>>(path: P) -> Result<()> {
     let target = target_lexicon::HOST.to_string();
     let build_kind = BUILD_KIND;
 
-    let url = format!("https://github.com/opeik/libcec-vendor/releases/download/v0.1.0/libcec-6.0.2-{target}-{build_kind}.zip");
+    let url = format!("https://github.com/opeik/owl/releases/download/libcec-v6.0.2/libcec-6.0.2-{target}-{build_kind}.zip");
     dbg!(target, build_kind, &url);
     if !path.as_ref().exists() {
         let file = reqwest::blocking::get(url)?.bytes()?;
