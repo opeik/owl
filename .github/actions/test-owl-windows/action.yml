@@ -22,7 +22,7 @@ runs:
           | Select-Object -ExpandProperty browser_download_url) `
           -OutFile dasel.exe
 
-        rust_toolchain = .\dasel.exe --write plain --file rust-toolchain.toml 'toolchain.channel'
+        [string] $rust_toolchain = .\dasel.exe --write plain --file rust-toolchain.toml 'toolchain.channel'
         "rust_toolchain=$rust_toolchain" >> $env:GITHUB_OUTPUT
 
     - name: Setup Rust cache toolchain
