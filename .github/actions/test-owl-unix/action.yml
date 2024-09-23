@@ -5,9 +5,6 @@ inputs:
   target:
     description: The target triple being tested.
     required: true
-  rust_toolchain:
-    description: The Rust toolchain to use.
-    required: true
 
 runs:
   using: composite
@@ -15,8 +12,15 @@ runs:
     - name: Install Nix
       uses: DeterminateSystems/nix-installer-action@main
 
+    - name: Get Rust toolchain
+      id: get_rust_toolchain
+      shell: bash
+      run: |
+        rust_toolchain="$(nix develop --command dasel --write plain --file rust-toolchain.toml 'toolchain.channel')"
+        printf 'rust_toolchain="%s"' "$rust_toolchain" >> "$GITHUB_OUTPUT"
+
     - name: Setup Rust cache toolchain
-      run: rustup toolchain install ${{ inputs.rust_toolchain }} --profile default
+      run: rustup toolchain install ${{ steps.get_rust_toolchain.outputs.rust_toolchain }} --profile default
       shell: bash
 
     - name: Setup Rust cache
@@ -27,9 +31,9 @@ runs:
       shell: bash
       run: |
         if [ -f 'cec_sys/src/bindings/${{ inputs.target }}.rs'  ]; then
-          echo 'BINDINGS_EXIST="false"' >> "$GITHUB_OUTPUT"
+          echo 'bindings_exist="false"' >> "$GITHUB_OUTPUT"
         else
-          echo 'BINDINGS_EXIST="true"' >> "$GITHUB_OUTPUT"
+          echo 'bindings_exist="true"' >> "$GITHUB_OUTPUT"
         fi
 
     - name: Generate missing bindings

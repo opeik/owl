@@ -43,11 +43,13 @@
                   IOKit
                   CoreVideo
                 ]));
+
+              ci = [dasel];
             };
           in
             mkShell {
               LIBCLANG_PATH = "${llvmPackages_16.libclang.lib}/lib";
-              packages = tools.owl ++ tools.libcec;
+              packages = tools.owl ++ tools.libcec ++ tools.ci;
             };
         }
     );
