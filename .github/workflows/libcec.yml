@@ -39,7 +39,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: libcec-${{ github.event.inputs.libcec_version }}-${{ matrix.arch }}-pc-windows-msvc-${{ matrix.build_type }}
+          name: libcec-v${{ github.event.inputs.libcec_version }}-${{ matrix.arch }}-pc-windows-msvc-${{ matrix.build_type }}
           path: ${{ steps.build_libcec.outputs.binary_path }}
           if-no-files-found: error
 
@@ -66,7 +66,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: libcec-${{ github.event.inputs.libcec_version }}-${{ matrix.arch }}-apple-darwin-${{ matrix.build_type }}
+          name: libcec-v${{ github.event.inputs.libcec_version }}-${{ matrix.arch }}-apple-darwin-${{ matrix.build_type }}
           path: ${{ steps.build_libcec.outputs.binary_path }}
           if-no-files-found: error
 
@@ -93,7 +93,7 @@ jobs:
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: libcec-${{ github.event.inputs.libcec_version }}-${{ matrix.arch }}-unknown-linux-gnu-${{ matrix.build_type }}
+          name: libcec-v${{ github.event.inputs.libcec_version }}-${{ matrix.arch }}-unknown-linux-gnu-${{ matrix.build_type }}
           path: ${{ steps.build_libcec.outputs.binary_path }}
           if-no-files-found: error
 
