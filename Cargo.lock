@@ -273,8 +273,18 @@ version = "0.1.0"
 dependencies = [
  "bcmp",
  "bindgen",
- "cfg-if",
+ "cec_bootstrap",
  "clap",
+ "color-eyre",
+ "target-lexicon",
+ "tempfile",
+]
+
+[[package]]
+name = "cec_bootstrap"
+version = "0.1.0"
+dependencies = [
+ "cfg-if",
  "color-eyre",
  "reqwest",
  "target-lexicon",
@@ -286,12 +296,10 @@ dependencies = [
 name = "cec_sys"
 version = "0.1.0"
 dependencies = [
+ "cec_bootstrap",
  "cfg-if",
  "color-eyre",
- "reqwest",
  "target-lexicon",
- "tempfile",
- "zip-extract",
 ]
 
 [[package]]

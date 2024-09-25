@@ -1,29 +1,12 @@
 #![feature(let_chains)]
 
-use std::{
-    io::Cursor,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
 
 use bcmp::AlgoSpec;
 use bindgen::callbacks::ParseCallbacks;
-use cfg_if::cfg_if;
+use cec_bootstrap::download_libcec;
 use clap::Parser;
 use color_eyre::eyre::Result;
-
-#[derive(Debug)]
-pub enum BuildKind {
-    Debug,
-    Release,
-}
-
-cfg_if! {
-    if #[cfg(debug_assertions)] {
-        const BUILD_KIND: BuildKind = BuildKind::Debug;
-    } else {
-        const BUILD_KIND: BuildKind = BuildKind::Release;
-    }
-}
 
 #[derive(clap::Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -53,20 +36,6 @@ fn main() -> Result<()> {
     download_libcec(&lib_path)?;
     run_bindgen(&src_path, &lib_path, &out_path)?;
     dbg!(&out_path);
-
-    Ok(())
-}
-
-fn download_libcec<P: AsRef<Path>>(path: P) -> Result<()> {
-    let target = target_lexicon::HOST.to_string();
-    let build_kind = BUILD_KIND;
-
-    let url = format!("https://github.com/opeik/owl/releases/download/libcec-v6.0.2/libcec-6.0.2-{target}-{build_kind}.zip");
-    dbg!(target, build_kind, &url);
-    if !path.as_ref().exists() {
-        let file = reqwest::blocking::get(url)?.bytes()?;
-        zip_extract::extract(Cursor::new(file), path.as_ref(), true)?;
-    }
 
     Ok(())
 }
@@ -220,15 +189,4 @@ impl ParseCallbacks for TidySymbols {
     fn func_macro(&self, _name: &str, _value: &[&[u8]]) {}
     fn include_file(&self, _filename: &str) {}
     fn read_env_var(&self, _key: &str) {}
-}
-
-impl std::fmt::Display for BuildKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            BuildKind::Debug => "debug",
-            BuildKind::Release => "release",
-        };
-
-        write!(f, "{s}")
-    }
 }
