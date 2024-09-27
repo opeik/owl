@@ -1,22 +1,27 @@
 use std::{env, path::PathBuf};
 
-use cec_bootstrap::{download_libcec, BuildKind, BUILD_KIND};
+use cec_bootstrap::{download_libcec, BuildKind};
 use color_eyre::eyre::{eyre, Result};
 use target_lexicon::OperatingSystem;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
+
     let download_path = PathBuf::from(env::var("OUT_DIR")?);
     let lib_path = download_path.join("libcec");
     let lib_path_str = lib_path.to_string_lossy();
-    dbg!(&lib_path);
+    let build_kind = match std::env::var("PROFILE")?.as_str() {
+        "debug" => BuildKind::Debug,
+        "release" => BuildKind::Release,
+        _ => return Err(eyre!("unexpected build profile")),
+    };
 
+    dbg!(&lib_path, target_lexicon::HOST, build_kind);
     println!("cargo:rustc-link-search=native={lib_path_str}");
     println!("cargo:rustc-link-lib=static=cec");
     println!("cargo:rustc-link-lib=static=p8-platform");
-    dbg!(target_lexicon::HOST);
 
-    match (target_lexicon::HOST.operating_system, BUILD_KIND) {
+    match (target_lexicon::HOST.operating_system, build_kind) {
         (OperatingSystem::Windows, BuildKind::Debug) => {
             println!("cargo:rustc-link-lib=dylib=msvcrtd");
         }
@@ -35,8 +40,8 @@ fn main() -> Result<()> {
         _ => return Err(eyre!("unsupported target")),
     };
 
-    // Building libcec from source is _painful_.
-    download_libcec(&lib_path)?;
+    // Building libcec from source is _painful_, so we don't!
+    download_libcec(&lib_path, build_kind)?;
 
     Ok(())
 }

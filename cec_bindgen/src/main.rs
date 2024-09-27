@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 
 use bcmp::AlgoSpec;
 use bindgen::callbacks::ParseCallbacks;
-use cec_bootstrap::download_libcec;
+use cec_bootstrap::{download_libcec, BuildKind};
 use clap::Parser;
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{eyre, Result};
 
 #[derive(clap::Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -29,11 +29,22 @@ fn main() -> Result<()> {
         Some(x) => x,
         None => format!("cec_sys/src/bindings/{}.rs", target_lexicon::HOST),
     });
+    let build_kind = match std::env::var("PROFILE")?.as_str() {
+        "debug" => BuildKind::Debug,
+        "release" => BuildKind::Release,
+        _ => return Err(eyre!("unexpected build profile")),
+    };
 
-    dbg!(build_path);
+    dbg!(
+        &lib_path,
+        &out_path,
+        tmp_dir,
+        target_lexicon::HOST,
+        build_kind
+    );
 
     // Building libcec from source is _painful_, so we don't!
-    download_libcec(&lib_path)?;
+    download_libcec(&lib_path, build_kind)?;
     run_bindgen(&src_path, &lib_path, &out_path)?;
     dbg!(&out_path);
 

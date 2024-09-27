@@ -284,7 +284,6 @@ dependencies = [
 name = "cec_bootstrap"
 version = "0.1.0"
 dependencies = [
- "cfg-if",
  "color-eyre",
  "reqwest",
  "target-lexicon",
