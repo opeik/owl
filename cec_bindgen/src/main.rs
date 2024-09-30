@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 
 use bcmp::AlgoSpec;
 use bindgen::callbacks::ParseCallbacks;
-use cec_bootstrap::{download_libcec, BuildKind};
+use cec_bootstrap::{fetch_libcec, BuildKind};
 use clap::Parser;
-use color_eyre::eyre::{eyre, Result};
+use color_eyre::eyre::{Context, Result};
 
 #[derive(clap::Parser, Debug)]
 #[command(version, about, long_about = None)]
@@ -19,33 +19,22 @@ struct Args {
 
 fn main() -> Result<()> {
     color_eyre::install()?;
-    let args = Args::try_parse()?;
+    let args = Args::parse();
 
-    let tmp_dir = tempfile::tempdir()?;
-    let build_path = PathBuf::from(tmp_dir.path());
+    let tmp_dir = tempfile::tempdir().context("failed to create temp directory")?;
+    let build_path = tmp_dir.path();
     let src_path = PathBuf::from(args.src_path);
     let lib_path = build_path.join("libcec");
     let out_path = PathBuf::from(match args.dest_path {
         Some(x) => x,
         None => format!("cec_sys/src/bindings/{}.rs", target_lexicon::HOST),
     });
-    let build_kind = match std::env::var("PROFILE")?.as_str() {
-        "debug" => BuildKind::Debug,
-        "release" => BuildKind::Release,
-        _ => return Err(eyre!("unexpected build profile")),
-    };
 
-    dbg!(
-        &lib_path,
-        &out_path,
-        tmp_dir,
-        target_lexicon::HOST,
-        build_kind
-    );
+    dbg!(&lib_path, &out_path, &tmp_dir, target_lexicon::HOST);
 
-    // Building libcec from source is _painful_, so we don't!
-    download_libcec(&lib_path, build_kind)?;
-    run_bindgen(&src_path, &lib_path, &out_path)?;
+    // Only the headers are used, so fetch the release version since it's smaller.
+    fetch_libcec(&lib_path, BuildKind::Release).context("failed to fetch libcec")?;
+    run_bindgen(&src_path, &lib_path, &out_path).context("failed to run bindgen")?;
     dbg!(&out_path);
 
     Ok(())
@@ -75,9 +64,13 @@ fn run_bindgen<P: AsRef<Path>>(src_path: P, lib_path: P, out_path: P) -> Result<
         ])
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .parse_callbacks(Box::new(TidySymbols))
-        .generate()?;
+        .generate()
+        .context("failed to generate bindings")?;
 
-    bindings.write_to_file(out_path.as_ref())?;
+    bindings.write_to_file(out_path.as_ref()).context(format!(
+        "failed to write bindings to `{}`",
+        out_path.as_ref().to_string_lossy()
+    ))?;
 
     Ok(())
 }

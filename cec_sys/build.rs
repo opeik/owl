@@ -1,19 +1,20 @@
 use std::{env, path::PathBuf};
 
-use cec_bootstrap::{download_libcec, BuildKind};
-use color_eyre::eyre::{eyre, Result};
+use cec_bootstrap::{fetch_libcec, BuildKind};
+use color_eyre::eyre::{eyre, Context, Result};
 use target_lexicon::OperatingSystem;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
 
-    let download_path = PathBuf::from(env::var("OUT_DIR")?);
+    let download_path =
+        PathBuf::from(env::var("OUT_DIR").context("env var `OUT_DIR` is undefined")?);
     let lib_path = download_path.join("libcec");
     let lib_path_str = lib_path.to_string_lossy();
-    let build_kind = match std::env::var("PROFILE")?.as_str() {
-        "debug" => BuildKind::Debug,
-        "release" => BuildKind::Release,
-        _ => return Err(eyre!("unexpected build profile")),
+    let build_kind = if cfg!(debug_assertions) {
+        BuildKind::Debug
+    } else {
+        BuildKind::Release
     };
 
     dbg!(&lib_path, target_lexicon::HOST, build_kind);
@@ -41,7 +42,7 @@ fn main() -> Result<()> {
     };
 
     // Building libcec from source is _painful_, so we don't!
-    download_libcec(&lib_path, build_kind)?;
+    fetch_libcec(&lib_path, build_kind).context("failed to download libcec")?;
 
     Ok(())
 }
