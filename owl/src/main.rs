@@ -2,7 +2,7 @@ use color_eyre::eyre::{eyre, Result};
 use owl::{cec, os, Recv, Send, Spawn};
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
-use tracing::{error, info};
+use tracing::{debug, error, info};
 
 #[tokio::main]
 async fn main() -> Result<()> {
@@ -29,7 +29,7 @@ async fn main() -> Result<()> {
     {
         tokio::select! {
             _ = signal::ctrl_c() => {
-                info!("received CTRL+C");
+                debug!("received CTRL+C");
                 run_token.cancel();
             },
             _ = owl_task => error!("owl stopped unexpectedly?!"),
@@ -53,8 +53,8 @@ fn init_tracing() -> Result<()> {
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
     let fmt_layer = fmt::layer();
-    let filter_layer =
-        EnvFilter::try_from_default_env().or_else(|_| EnvFilter::try_new("owl=trace"))?;
+    let filter_layer = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new("owl=trace,owl::os::windows::internal=debug"))?;
 
     tracing_subscriber::registry()
         .with(filter_layer)

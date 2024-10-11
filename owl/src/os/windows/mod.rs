@@ -5,7 +5,7 @@ use std::thread;
 use color_eyre::eyre::{eyre, Context, Result};
 use tokio::sync::{mpsc, oneshot};
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, trace};
+use tracing::debug;
 
 use crate::{
     job::{self, Recv, SpawnResult},
@@ -26,7 +26,7 @@ impl Spawn for Job {
         let (window_tx, window_rx) = oneshot::channel::<Window>();
         let (ready_tx, ready_rx) = oneshot::channel::<Result<()>>();
 
-        trace!("spawning os job...");
+        debug!("spawning os job...");
         let join_handle = thread::spawn(move || {
             debug!("os job starting...");
 
@@ -36,7 +36,7 @@ impl Spawn for Job {
             // then send it back to async land.
             job::send_ready_status(ready_tx, || match Window::new(event_tx.clone()) {
                 Ok(x) => {
-                    trace!("sending window handle to task...");
+                    debug!("sending window handle to task...");
                     window_tx
                         .send(x)
                         .map_err(|_| eyre!("failed to send window handle to task"))
@@ -57,7 +57,7 @@ impl Spawn for Job {
         let window = window_rx
             .await
             .context("failed to receive window handle from job")?;
-        trace!("received window handle from job!");
+        debug!("received window handle from job!");
 
         // Dropping the `Window` will stop the event loop, saving us having to poll.
         let _watchdog = tokio::spawn(async move {

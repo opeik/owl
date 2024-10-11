@@ -119,7 +119,7 @@ impl Spawn for Job {
         let (cmd_tx, mut cmd_rx) = mpsc::channel::<Command>(8);
         let (ready_tx, ready_rx) = oneshot::channel::<Result<()>>();
 
-        trace!("spawning cec job...");
+        debug!("spawning cec job...");
         let handle = thread::spawn(move || {
             debug!("cec job starting...");
 
@@ -129,7 +129,7 @@ impl Spawn for Job {
 
             loop {
                 if run_token.is_cancelled() {
-                    trace!("stopping cec job...");
+                    debug!("stopping cec job...");
                     break;
                 }
 
@@ -168,7 +168,7 @@ impl job::Send<Command> for Job {
 
 impl Cec {
     pub fn new() -> Result<Self> {
-        trace!("connecting to cec...");
+        debug!("connecting to cec...");
         let connection = cec::Connection::builder()
             .detect_device(true)
             .name("owl".to_owned())
@@ -181,7 +181,7 @@ impl Cec {
             .connect()
             .context("failed to connect to cec")?;
 
-        trace!("connected to cec!");
+        debug!("connected to cec!");
         Ok(Self(connection))
     }
 

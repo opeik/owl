@@ -1,7 +1,7 @@
 use std::{ptr, sync::OnceLock};
 
 use color_eyre::eyre::{eyre, Context, Result};
-use tracing::{error, trace};
+use tracing::{debug, error, trace};
 
 use crate::os as owl;
 
@@ -91,6 +91,9 @@ struct KeyEvent {
     pub code: KeyCode,
 }
 
+// TODO: replace eyre with thiserror in this package
+// TODO: instead of using `.unwrap/expect()` send the error to owl via channel
+
 pub fn event_loop() {
     let mut msg = api::WindowsAndMessaging::MSG::default();
 
@@ -113,13 +116,13 @@ impl Window {
             .set(OwlHandle { event_tx })
             .map_err(|_| eyre!("failed to set owl state"))?;
 
-        trace!("creating window...");
+        debug!("creating window...");
         let module = Self::module_handle()?;
         let _window_class = Self::new_window_class(module)?;
         let window = Self::new_window(module)?;
         let key_hook = Self::new_key_hook(module)?;
         let power_notify = Self::new_power_notify(window)?;
-        trace!("window created!");
+        debug!("window created!");
 
         Ok(Self {
             handle: window,
@@ -130,7 +133,7 @@ impl Window {
 
     /// See: <https://learn.microsoft.com/en-us/windows/win32/api/libloaderapi/nf-libloaderapi-getmodulehandlew>
     fn module_handle() -> Result<api::HMODULE> {
-        trace!("getting module handle...");
+        debug!("getting module handle...");
 
         let module = unsafe {
             api::LibraryLoader::GetModuleHandleW(None).context("failed to get module handle")?
@@ -145,7 +148,7 @@ impl Window {
 
     /// See: <https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerclassw>
     fn new_window_class(module: api::HMODULE) -> Result<api::WNDCLASSW> {
-        trace!("registering window class...");
+        debug!("registering window class...");
         let window_class = api::WNDCLASSW {
             hInstance: module.into(),
             style: api::WindowsAndMessaging::CS_HREDRAW | api::WindowsAndMessaging::CS_VREDRAW,
@@ -164,7 +167,7 @@ impl Window {
 
     /// See: <https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-createwindowexw>
     fn new_window(module: api::HMODULE) -> Result<api::HWND> {
-        trace!("creating window...");
+        debug!("creating window...");
 
         let window = unsafe {
             api::WindowsAndMessaging::CreateWindowExW(
@@ -193,7 +196,7 @@ impl Window {
 
     /// See: <https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registerpowersettingnotification>
     fn new_power_notify(window: api::HWND) -> Result<api::HPOWERNOTIFY> {
-        trace!("registering for power notifications...");
+        debug!("registering for power notifications...");
 
         unsafe {
             api::Power::RegisterPowerSettingNotification(
@@ -207,7 +210,7 @@ impl Window {
 
     /// See: <https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowshookexw>
     fn new_key_hook(module: api::HMODULE) -> Result<api::HHOOK> {
-        trace!("registering key hook...");
+        debug!("registering key hook...");
 
         unsafe {
             api::WindowsAndMessaging::SetWindowsHookExW(
@@ -225,7 +228,7 @@ impl Drop for Window {
     fn drop(&mut self) {
         let inner = |window: &mut Self| -> Result<()> {
             // See: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postmessagew
-            trace!("requesting the window be closed...");
+            debug!("requesting the window be closed...");
             unsafe {
                 api::WindowsAndMessaging::PostMessageW(
                     window.handle,
@@ -236,16 +239,16 @@ impl Drop for Window {
             };
 
             // See: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-unregisterpowersettingnotification
-            trace!("unregistering power notifications...");
+            debug!("unregistering power notifications...");
             unsafe { api::Power::UnregisterPowerSettingNotification(window.power_notify)? };
 
             // See: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-unhookwindowshookex
-            trace!("unregistering key hook...");
+            debug!("unregistering key hook...");
             unsafe { api::WindowsAndMessaging::UnhookWindowsHookEx(window.key_hook)? };
             Ok(())
         };
 
-        trace!("dropping window...");
+        debug!("dropping window...");
         if let Err(e) = inner(self) {
             error!("failed to drop window: {e}");
         }
@@ -375,20 +378,12 @@ extern "system" fn handle_window_event(
     let ok = || api::LRESULT(0);
     let OwlHandle { event_tx } = get_owl_handle!(defer);
 
-    let msg_params = match u32::try_from(wparam.0) {
-        Ok(x) => x,
-        Err(e) => {
-            error!("failed to convert window message params: {e}");
-            return defer();
-        }
-    };
-
     match msg {
         // The window should terminate.
         // See: https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-close
         api::WindowsAndMessaging::WM_CLOSE => {
             // See: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-destroywindow
-            trace!("received `WM_CLOSE` event, destroying window...");
+            debug!("received `WM_CLOSE` event, destroying window...");
             unsafe {
                 api::WindowsAndMessaging::DestroyWindow(window).expect("failed to destroy window");
             };
@@ -399,39 +394,50 @@ extern "system" fn handle_window_event(
         // See: https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-destroy
         api::WindowsAndMessaging::WM_DESTROY => {
             // See: https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-postquitmessage
-            trace!("received `WM_DESTROY` event, stopping event loop...");
+            debug!("received `WM_DESTROY` event, stopping event loop...");
             unsafe { api::WindowsAndMessaging::PostQuitMessage(0) };
             return ok();
         }
 
         // A power-management event has occurred.
         // See: https://learn.microsoft.com/en-us/windows/win32/power/wm-powerbroadcast
-        api::WindowsAndMessaging::WM_POWERBROADCAST => match msg_params {
-            // The system is resuming from sleep.
-            // See: https://learn.microsoft.com/en-us/windows/win32/power/pbt-apmresumeautomatic
-            api::WindowsAndMessaging::PBT_APMRESUMEAUTOMATIC => {
-                send_event(&event_tx, owl::Event::Resume);
-            }
+        api::WindowsAndMessaging::WM_POWERBROADCAST => {
+            let power_msg = match u32::try_from(wparam.0) {
+                Ok(x) => x,
+                Err(e) => {
+                    error!("failed to convert window message params: {e}");
+                    return defer();
+                }
+            };
 
-            // The system is about to sleep.
-            // See: https://learn.microsoft.com/en-us/windows/win32/power/pbt-apmsuspend
-            api::WindowsAndMessaging::PBT_APMSUSPEND => {
-                send_event(&event_tx, owl::Event::Suspend);
-            }
+            match power_msg {
+                // The system is resuming from sleep.
+                // See: https://learn.microsoft.com/en-us/windows/win32/power/pbt-apmresumeautomatic
+                api::WindowsAndMessaging::PBT_APMRESUMEAUTOMATIC => {
+                    send_event(&event_tx, owl::Event::Resume);
+                }
 
-            // A power setting change occurred.
-            // See: https://learn.microsoft.com/en-us/windows/win32/power/pbt-powersettingchange
-            api::WindowsAndMessaging::PBT_POWERSETTINGCHANGE => {
-                if let Ok(power_event) = PowerEvent::try_from(lparam)
+                // The system is about to sleep.
+                // See: https://learn.microsoft.com/en-us/windows/win32/power/pbt-apmsuspend
+                api::WindowsAndMessaging::PBT_APMSUSPEND => {
+                    send_event(&event_tx, owl::Event::Suspend);
+                }
+
+                // A power setting change occurred.
+                // See: https://learn.microsoft.com/en-us/windows/win32/power/pbt-powersettingchange
+                api::WindowsAndMessaging::PBT_POWERSETTINGCHANGE => {
+                    if let Ok(power_event) = PowerEvent::try_from(lparam)
                     // Check the current display is turning off.
                     && power_event.target() == api::SystemServices::GUID_CONSOLE_DISPLAY_STATE
                     && power_event.state() == api::SystemServices::PowerMonitorOff
-                {
-                    send_event(&event_tx, owl::Event::Suspend);
+                    {
+                        send_event(&event_tx, owl::Event::Suspend);
+                    }
                 }
-            }
-            _ => {}
-        },
+                _ => {}
+            };
+        }
+
         _ => {}
     };
 

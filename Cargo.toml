@@ -10,6 +10,7 @@ debug = true
 
 [workspace.lints.clippy]
 missing_errors_doc = "allow"
+option_if_let_else = "allow"
 unwrap_in_result = "warn"
 unwrap_used = "warn"
 pedantic = { level = "warn", priority = -1 }
