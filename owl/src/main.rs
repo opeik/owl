@@ -13,9 +13,8 @@ async fn main() -> Result<()> {
     let run_token = CancellationToken::new();
     let (cec_handle, cec) = cec::Job::spawn(run_token.clone()).await?;
     let (os_handle, mut os) = os::Job::spawn(run_token.clone()).await?;
-    let handles = [cec_handle, os_handle];
 
-    let owl_task = tokio::spawn(async move {
+    let owl_handle = tokio::spawn(async move {
         loop {
             let result: Result<()> = async {
                 let event = os.recv().await.context("failed to receive os event")?;
@@ -44,17 +43,18 @@ async fn main() -> Result<()> {
                 debug!("received CTRL+C");
                 run_token.cancel();
             },
-            _ = owl_task => error!("owl stopped unexpectedly?!"),
+            _ = owl_handle => error!("owl stopped unexpectedly?!"),
             _ = run_token.cancelled() => error!("run token cancelled?!"),
         }
     }
 
     info!("stopping owl...");
-    for handle in handles {
-        handle
-            .join()
-            .map_err(|e| eyre!("failed to join job handle: {e:?}"))??;
-    }
+    cec_handle
+        .join()
+        .map_err(|e| eyre!("failed to join cec job: {e:?}"))??;
+    os_handle
+        .join()
+        .map_err(|e| eyre!("failed to join os job: {e:?}"))??;
 
     info!("owl stopped!");
     Ok(())
@@ -65,8 +65,9 @@ fn init_tracing() -> Result<()> {
     use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
     let fmt_layer = fmt::layer();
-    let filter_layer = EnvFilter::try_from_default_env()
-        .or_else(|_| EnvFilter::try_new("owl=trace,owl::os::windows=debug"))?;
+    let filter_layer =
+        EnvFilter::try_from_default_env().or_else(|_| EnvFilter::try_new("owl=trace"))?;
+    // .or_else(|_| EnvFilter::try_new("owl=trace,owl::os::windows=debug"))?;
 
     tracing_subscriber::registry()
         .with(filter_layer)

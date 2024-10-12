@@ -57,7 +57,7 @@ impl Job {
     fn handle_cmd(cec: &Cec, cmd_rx: &mut CommandRx, last_cmd: &mut LastCmd) {
         // Volume up/down events fire continuously if the button is held.
         // Debouncing prevents the channel and CEC bus from getting congested.
-        if let Ok(cmd) = cmd_rx.try_recv()
+        if let Some(cmd) = cmd_rx.blocking_recv()
             && let Some(cmd) = Self::debounce_cmd(cmd, last_cmd)
         {
             debug!("sending command: {cmd:?}");
