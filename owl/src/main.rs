@@ -1,4 +1,4 @@
-use color_eyre::eyre::{eyre, Result};
+use color_eyre::eyre::{eyre, Context, Result};
 use owl::{cec, os, Recv, Send, Spawn};
 use tokio::signal;
 use tokio_util::sync::CancellationToken;
@@ -16,16 +16,28 @@ async fn main() -> Result<()> {
     let handles = [cec_handle, os_handle];
 
     let owl_task = tokio::spawn(async move {
-        while let Ok(event) = os.recv().await {
-            if let Err(e) = cec.send(event.into()).await {
-                error!("failed to send cec command: {e}");
+        loop {
+            let result: Result<()> = async {
+                let event = os.recv().await.context("failed to receive os event")?;
+                cec.send(event.into())
+                    .await
+                    .context("failed to send cec event")?;
+                Result::Ok(())
+            }
+            .await;
+
+            match result {
+                Ok(()) => {}
+                Err(e) => {
+                    error!("owl error: {e:?}");
+                }
             }
         }
     });
 
     info!("owl ready!");
 
-    #[allow(clippy::ignored_unit_patterns)]
+    #[allow(clippy::ignored_unit_patterns, clippy::redundant_pub_crate)]
     {
         tokio::select! {
             _ = signal::ctrl_c() => {
@@ -54,7 +66,7 @@ fn init_tracing() -> Result<()> {
 
     let fmt_layer = fmt::layer();
     let filter_layer = EnvFilter::try_from_default_env()
-        .or_else(|_| EnvFilter::try_new("owl=trace,owl::os::windows::internal=debug"))?;
+        .or_else(|_| EnvFilter::try_new("owl=trace,owl::os::windows=debug"))?;
 
     tracing_subscriber::registry()
         .with(filter_layer)

@@ -190,8 +190,8 @@ impl Cec {
     }
 
     #[allow(clippy::needless_pass_by_value)]
-    fn on_command_received(command: cec::Cmd) {
-        trace!(target: "libcec", "command received: {:?}", command);
+    fn on_command_received(cmd: cec::Cmd) {
+        trace!(target: "libcec", "command received: {:?}", cmd);
     }
 
     #[allow(clippy::needless_pass_by_value)]
