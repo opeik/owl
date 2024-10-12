@@ -1235,10 +1235,10 @@ version = "0.1.0"
 dependencies = [
  "cec",
  "cfg-if",
- "clap",
  "color-eyre",
  "derive_more",
  "once_cell",
+ "thiserror",
  "tokio",
  "tokio-util",
  "tracing",
