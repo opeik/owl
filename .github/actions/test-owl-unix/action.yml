@@ -10,7 +10,7 @@ runs:
   using: composite
   steps:
     - name: Install Nix
-      uses: DeterminateSystems/nix-installer-action@main
+      uses: samueldr/lix-gha-installer-action@latest
 
     - name: Get Rust toolchain
       id: get_rust_toolchain
