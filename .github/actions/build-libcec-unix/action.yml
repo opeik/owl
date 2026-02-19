@@ -27,7 +27,7 @@ runs:
         repository: opeik/libcec
 
     - name: Install Nix
-      uses: DeterminateSystems/nix-installer-action@main
+      uses: samueldr/lix-gha-installer-action@latest
 
     - name: Build libcec
       shell: bash
